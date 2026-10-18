@@ -1,0 +1,60 @@
+name: Portable loader and workbench
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'game/src/ext/**'
+      - 'game/debug/loader_integration_checks*'
+      - 'native/**'
+      - 'tools/portable_release.py'
+      - 'tools/install_godot_ci.py'
+      - 'workbench/**'
+      - '.github/workflows/portable-loader.yml'
+  pull_request:
+    paths:
+      - 'game/src/ext/**'
+      - 'native/**'
+      - 'tools/**'
+      - 'workbench/**'
+      - '.github/workflows/portable-loader.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  portable:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install verified official engine and templates
+        run: python3 tools/install_godot_ci.py --bin-dir "${{ runner.temp }}/godot"
+      - name: Verify build-tool boundaries and regression accounting
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Build the Linux native debug library
+        run: |
+          python3 -m pip install scons==4.11.1
+          scons -C native platform=linux target=template_debug arch=x86_64 -j2
+      - name: Import project class registry
+        run: godot --headless --editor --path game --import
+      - name: Verify existing-project loader integration
+        run: python3 tools/portable_release.py integration
+      - name: Verify and export neutral workbench
+        run: python3 tools/portable_release.py export --target linux --target windows --target web
+      - name: Preserve artifacts and failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portable-loader-results
+          if-no-files-found: warn
+          path: |
+            build/portable/*.json
+            build/portable/*.log
+            build/portable/ENGINE-LICENSES.txt
+            build/portable/workbench-*.zip

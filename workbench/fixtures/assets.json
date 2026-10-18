@@ -1,0 +1,6 @@
+[
+  {"id": "sample:station", "name": "Station", "kind": "background", "slot": "background", "color": "273952"},
+  {"id": "sample:garden", "name": "Garden", "kind": "background", "slot": "background", "color": "285343"},
+  {"id": "sample:blue-jacket", "name": "Blue Jacket", "kind": "costume", "slot": "outerwear", "color": "408de0"},
+  {"id": "sample:gold-jacket", "name": "Gold Jacket", "kind": "costume", "slot": "outerwear", "color": "e4b95d"}
+]

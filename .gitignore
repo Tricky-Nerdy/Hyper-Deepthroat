@@ -17,6 +17,7 @@ __pycache__/
 
 # Native extension build outputs (build with scons in native/, see native/README.md)
 /native/src/*.o
+/native/src/*.os
 /native/.sconsign*.dblite
 /game/bin/*.dll
 !/game/bin/sdt_native.windows.template_debug.x86_64.dll
@@ -31,3 +32,10 @@ __pycache__/
 /notes/
 /user/
 /run_debug.local.bat
+
+# Reproducible neutral-workbench outputs and Apple native build products
+/build/
+/game/bin/*.dylib
+/game/bin/*.framework/
+/game/bin/*.xcframework/
+/game/export_credentials.cfg

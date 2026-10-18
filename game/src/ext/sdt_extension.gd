@@ -38,6 +38,9 @@ var folder := ""
 var default_enabled := false
 ## Set by Extensions while the extension is on.
 var enabled := false
+## Set through fail_initialization() when setup cannot complete. Managed registrations are released.
+var initialization_error := ""
+var _setup_complete := false
 
 var _settings: Dictionary = {}   # key -> {"value", "default", "label", "desc", "min", "max", "step", "options"}
 var _setting_order: Array = []
@@ -58,6 +61,15 @@ func _enable() -> void:
 ## Called when the extension is switched off, after its hooks and tick callbacks were removed.
 func _disable() -> void:
 	pass
+
+
+func fail_initialization(reason: String) -> void:
+	initialization_error = reason if not reason.is_empty() else "initialization failed"
+
+
+## Slot must have been defined with Extensions.owned_slots.define(). Released automatically on disable.
+func replace_slot(slot: String, value) -> bool:
+	return Extensions.owned_slots.replace(id, slot, value)
 
 
 ## Called after a setting changed (from the options screen or set_setting()).

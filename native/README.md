@@ -9,6 +9,26 @@ Currently native:
 - `SDTNative.build_strand` - Strand.renderStrand / generateInterpolationPoints as one vertex-coloured mesh (gradient
   stops reproduced exactly by splitting triangles at the stop lines).
 - `SDTNative.hit_shape` - shape-flag hit testing (FlashSprite / FlashShape `_hit_shape`) over the display tree.
+- `SWFFile` - runtime SWF reading and rasterization for mod conversion. This is a required capability for
+  runtime conversion, not an optional acceleration of a complete GDScript converter.
+
+## Linux and other target builds
+
+Initialize `native/godot-cpp` with `git submodule update --init native/godot-cpp` from the repository root.
+Install SCons in an isolated Python environment. From `native/`:
+
+```sh
+scons platform=linux arch=x86_64 target=template_debug -j4
+scons platform=linux arch=x86_64 target=template_release -j4
+```
+
+The `.gdextension` maps Linux x86-64/arm64, macOS universal and Android arm64 filenames in addition to the
+existing Windows entries. Each platform still needs its matching compiler/SDK and built library; a mapping
+is not a shipped binary or evidence of platform support. iOS/Web native integration is not configured.
+
+`build_profile.json` trims godot-cpp to the classes used by this extension and required binding infrastructure.
+Both debug and release Linux builds are verified separately. Shared-library prefixes are normalized so Unix
+output matches the configured `sdt_native.<platform>.<target>.<arch>` filenames.
 
 ## Building (Windows)
 

@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "id": "arrival",
+  "start": "welcome",
+  "variables": {"visited_gallery": false},
+  "nodes": {
+    "welcome": {"type": "say", "speaker": "Guide", "text": "Welcome to the station. Where would you like to go?", "next": "route"},
+    "route": {"type": "choice", "choices": [
+      {"text": "Visit the gallery", "next": "mark_gallery"},
+      {"text": "Take the garden path", "next": "garden"},
+      {"text": "Describe the gallery again", "next": "gallery", "when": {"key": "visited_gallery", "equals": true}}
+    ]},
+    "mark_gallery": {"type": "set", "key": "visited_gallery", "value": true, "next": "gallery"},
+    "gallery": {"type": "say", "speaker": "Guide", "text": "The gallery is full of hand-drawn maps and colorful costumes.", "next": "route"},
+    "garden": {"type": "say", "speaker": "Guide", "text": "A quiet path leads through the garden. Your journey begins here.", "next": "finish"},
+    "finish": {"type": "end"}
+  }
+}

@@ -11,6 +11,19 @@ the port reimplements are included in `game/assets/mods/` (for example DialogueA
 to their authors (the original game's author, and the mods' authors) and are not covered by this repository's
 license. If you are a rights holder and want something removed, please open an issue.
 
+## Loader maintenance fork
+
+This branch extends the existing Godot loader with validated plugin manifests, dependency diagnostics,
+dependency-aware enable/disable, managed replacement restoration and runtime capability reports.
+See [the compatibility contract](docs/loader-compatibility.md) for implemented behavior and unverified legacy
+targets. Broad TemplateExtension/ExtraMod parity and pixel-perfect rendering are not established.
+
+A [portable neutral workbench](docs/portable-workbench.md) exercises the shared loader core, exact-name asset
+commands and branching dialogue without exporting third-party game assets. Run
+`python3 tools/portable_release.py verify` from the repository root. Cross-platform export attempts produce
+machine-readable results and logs, including failed targets.
+See [release results](docs/release-results.md) for measured checks and deployment blockers.
+
 ## Layout
 
 - `game/`: the Godot project.
@@ -40,9 +53,10 @@ license. If you are a rights holder and want something removed, please open an i
 
 You can also open `game/` in the Godot editor and press F5.
 
-The ready-to-run setup is for **Windows** (the launcher and the prebuilt native extension). On Linux or macOS, run
+The prebuilt setup is for **Windows** (the launcher and the included native extension). On Linux or macOS, run
 `godot --headless --path game --import` once, then `godot --path game`. There is no prebuilt native extension for
-those systems yet: Godot reports the missing library and the game uses its slower GDScript code instead.
+those systems in the repository: build the native library using [native/README.md](native/README.md).
+Some simulation paths fall back to GDScript, but runtime SWF conversion specifically requires `SWFFile`.
 
 ## Regenerating the assets (optional)
 

@@ -1,0 +1,12 @@
+{
+  "enabled_classes": [
+    "FileAccess",
+    "Geometry2D",
+    "Image",
+    "Node2D",
+    "Object",
+    "OS",
+    "RefCounted",
+    "Script"
+  ]
+}

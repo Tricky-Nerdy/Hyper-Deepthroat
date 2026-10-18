@@ -7,7 +7,10 @@
 import os
 
 ARGUMENTS.setdefault("custom_api_file", os.path.abspath("extension_api.json"))
+ARGUMENTS.setdefault("build_profile", os.path.abspath("build_profile.json"))
 env = SConscript("godot-cpp/SConstruct")
+# Keep filenames consistent across platforms (Unix would otherwise add a "lib" prefix).
+env["SHLIBPREFIX"] = ""
 env.Append(CPPPATH=["src/"])
 sources = Glob("src/*.cpp")
 library = env.SharedLibrary("../game/bin/sdt_native{}{}".format(env["suffix"], env["SHLIBSUFFIX"]), source=sources)

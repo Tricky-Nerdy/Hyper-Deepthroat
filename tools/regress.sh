@@ -57,11 +57,13 @@ ext_pid=$!
 "$GODOT" --headless --fixed-fps 30 --path game -- --save-dir="$WORK/save_da" --mods-dir="$WORK/mods_da" \
 	--driver=res://debug/da_checks.gd > "$WORK/da_checks.log" 2>&1 &
 da_pid=$!
-for p in $pids; do wait "$p"; done
+scenario_status=0
+for p in $pids; do wait "$p" || scenario_status=1; done
 wait "$ext_pid"; ext_status=$?
 wait "$da_pid"; da_status=$?
 
-fail=0
+fail=$scenario_status
+[ "$scenario_status" = 0 ] || echo "FAIL: a scenario process exited unsuccessfully"
 for s in $scenarios; do
 	# Errors during the run count as failures (Godot's leak reports at exit do not).
 	if grep "ERROR" "$WORK/$s.log" | grep -v "at exit" > /dev/null; then
@@ -74,6 +76,16 @@ for s in $scenarios; do
 		echo "FAIL $s: no dumps written (see $WORK/$s.log)"
 		fail=1
 		continue
+	fi
+	# A partial output set is a failure even if every file that did appear matches.
+	if [ "$update" = 0 ]; then
+		for expected in "$GOLDEN/${s}_"*; do
+			[ -f "$expected" ] || continue
+			if [ ! -f "$WORK/out/$(basename "$expected")" ]; then
+				echo "FAIL $s: expected dump missing: $(basename "$expected")"
+				fail=1
+			fi
+		done
 	fi
 	for f in $got; do
 		if [ $update = 1 ]; then
@@ -121,7 +133,10 @@ fi
 
 if [ $stress = 1 ]; then
 	echo "stress test (4 rounds of every picker and character)..."
-	run_game stress --driver=res://debug/stress_costumes.gd
+	run_game stress --driver=res://debug/stress_costumes.gd || fail=1
+	if [ -n "$(script_errors "$WORK/stress.log")" ]; then
+		fail=1
+	fi
 	grep "^STRESS" "$WORK/stress.log"
 fi
 
