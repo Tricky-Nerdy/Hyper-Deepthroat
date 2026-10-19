@@ -38,6 +38,12 @@ var _proxy: CanvasItem = null
 var _listeners: Dictionary = {}
 
 
+func _init() -> void:
+	# POSTINITIALIZE is not reliable for script-created nodes. Register in construction
+	# as well as on EXIT_TREE, including objects never added to a tree.
+	off_tree[get_instance_id()] = true
+
+
 # ---------------------------------------------------------------- tree helpers
 
 ## Flash parent container (DisplayObject.parent).

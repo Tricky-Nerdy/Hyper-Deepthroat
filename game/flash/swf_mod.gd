@@ -16,7 +16,7 @@ var abc: Array[FlashAbc] = []
 
 
 static func register() -> void:
-	if ClassDB.class_exists(&"SWFFile"):
+	if ClassDB.class_exists(&"SWFFile") and not FlashLoader.handlers.has(_loader_handler):
 		FlashLoader.handlers.append(_loader_handler)
 
 
@@ -30,6 +30,23 @@ static func _loader_handler(path: String, bytes: PackedByteArray) -> FlashDispla
 
 
 static var _loaded: Dictionary = {}   # digest -> FlashSwfMod (each file's library is loaded once)
+
+
+## Final teardown only, after display objects have been freed. RefCounted does not collect
+## the library <-> mod and bytecode <-> host cycles. Do not use this to unload a live mod.
+static func shutdown() -> void:
+	# Older callers may already have registered it more than once.
+	while FlashLoader.handlers.has(_loader_handler):
+		FlashLoader.handlers.erase(_loader_handler)
+	for mod in _loaded.values():
+		if mod.library != null and mod.library.mod == mod:
+			mod.library.mod = null
+		for code in mod.abc:
+			if code.host == mod:
+				code.host = null
+		mod.abc.clear()
+		mod.library = null
+	_loaded.clear()
 
 
 ## True if 'dir' holds a conversion made by the current converter.

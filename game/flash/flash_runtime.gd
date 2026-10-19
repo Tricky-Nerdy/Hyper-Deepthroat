@@ -7,6 +7,7 @@ extends Node
 ## between ticks.
 
 const BASE_LIBRARY := "res://assets/sdt"
+const ContentPaths := preload("res://flash/content_paths.gd")
 
 const SHAPE_SHADERS := {
 	"normal": preload("res://flash/shaders/shape_mix.gdshader"),
@@ -945,6 +946,7 @@ func _notification(what: int) -> void:
 		FlashLibrary.drain_streaming()
 	if what == NOTIFICATION_PREDELETE:
 		free_orphans_at_exit()
+		FlashSwfMod.shutdown()
 
 
 func _set_focus(o: FlashDisplayObject) -> void:
@@ -1109,11 +1111,11 @@ func set_master_volume(v: float) -> void:
 # ---------------------------------------------------------------- external content
 
 ## Folder that relative content paths (mods, custom hair / backgrounds) resolve against, like a SWF's own
-## location in Flash: the executable's folder when exported, the project's parent folder in the editor.
+## location in Flash: the executable's folder on desktop, the project's parent in the editor,
+## and app-private writable user data on mobile/Web (the package/executable is not writable).
 func content_root() -> String:
-	if OS.has_feature("editor"):
-		return ProjectSettings.globalize_path("res://").get_base_dir().get_base_dir()
-	return OS.get_executable_path().get_base_dir()
+	return ContentPaths.root(OS.get_name(), OS.has_feature("editor"),
+		ProjectSettings.globalize_path("res://"), OS.get_executable_path(), OS.get_user_data_dir())
 
 
 ## Mods/ next to the game, organised by purpose. The folders only decide where file dialogs open: what a mod
@@ -1125,7 +1127,7 @@ const MOD_FOLDERS := ["Clothing", "Hair", "Backgrounds", "Characters", "Dialogue
 var mods_dir_override := ""
 
 
-## Mods/ (or one of its MOD_FOLDERS) next to the game.
+## Mods/ (or one of its MOD_FOLDERS) in the platform content root, unless explicitly overridden.
 func mods_dir(sub: String = "") -> String:
 	var d := mods_dir_override if mods_dir_override != "" else content_root().path_join("Mods")
 	return d.path_join(sub) if sub != "" else d
@@ -1168,4 +1170,3 @@ func capture_screen(stage_size: Vector2, scale: float = 1.0) -> Image:
 		out.resize(want.x, want.y, Image.INTERPOLATE_LANCZOS if want.x < out.get_width() else Image.INTERPOLATE_CUBIC)
 	out.convert(Image.FORMAT_RGBA8)
 	return out
-

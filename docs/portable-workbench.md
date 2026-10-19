@@ -25,6 +25,19 @@ source allowlist into an isolated Godot project, including generated export pres
 personal files, arbitrary mods or model weights are scanned or copied. Open the staged project rather
 than `workbench/`, whose `core/` references are populated during staging.
 
+## Local debug loop
+
+`python3 tools/dev_debug.py` stages the neutral application under `build/debug/portable/project`, isolates
+its user data, watches original neutral sources and restarts the process after debounced edits. Local
+JSONL logs are bounded; optional engine FPS/frame-gap/static-memory samples are distinct from process
+heartbeats. This is process restart, not state-preserving hot reload. See [debugging.md](debugging.md) for
+shutdown/retry behavior, breakpoint/step instructions and the opt-in actual-Godot lifecycle check.
+
+For temporary fixture testing, `stage --source-root <fixture-root>` reads the same fixed neutral allowlist.
+Staging uses complete-tree replacement with rollback; failed preparation retains the previous project.
+`stage --disable-file-logging` disables duplicate engine logs only in that staged copy, including the
+desktop override. These staging-only switches do not redirect verify/export to arbitrary game content.
+
 ## Authoring features
 
 - `wear Blue Jacket; background Station` resolves exact names to typed asset-selection commands.

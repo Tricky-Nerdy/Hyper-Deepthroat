@@ -23,6 +23,11 @@ commands and branching dialogue without exporting third-party game assets. Run
 `python3 tools/portable_release.py verify` from the repository root. Cross-platform export attempts produce
 machine-readable results and logs, including failed targets.
 See [release results](docs/release-results.md) for measured checks and deployment blockers.
+Existing-game Android review builds have separate [APK/runtime evidence](docs/android-preview.md).
+See the [platform and authoring completion plan](docs/platform-completion-plan.md) for remaining release gates;
+neither a packaged preview nor the neutral workbench establishes that the whole game is complete.
+An opt-in [local AI provider foundation](docs/local-ai-providers.md) supports LM Studio, ComfyUI and optional
+AUTOMATIC1111 protocol adapters with mock tests; game UI wiring, real-server and phone verification remain pending.
 
 ## Layout
 
