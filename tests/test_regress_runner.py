@@ -17,6 +17,13 @@ if "--driver=res://debug/ext_checks.gd" in args:
     print("EXT CHECKS: 1 passed, 0 failed")
 elif "--driver=res://debug/da_checks.gd" in args:
     print("DA CHECKS: 1 passed, 0 failed")
+elif "--driver=res://debug/menu_checks.gd" in args:
+    if os.environ["MODE"] != "menu_missing":
+        print("MENU CHECKS: 1 passed, 0 failed")
+    if os.environ["MODE"] == "menu_error":
+        print("SCRIPT ERROR: neutral menu fixture failure")
+        print("   at: fixture (menu_checks.gd:1)")
+    sys.exit(7 if os.environ["MODE"] == "menu_exit" else 0)
 elif "--driver=res://debug/stress_costumes.gd" in args:
     print("STRESS neutral fixture")
     sys.exit(7 if os.environ["MODE"] == "stress_exit" else 0)
@@ -63,6 +70,13 @@ class RegressionAccounting(unittest.TestCase):
         code, output = self.run_fixture("missing_dump")
         self.assertNotEqual(code, 0, output)
         self.assertIn("expected dump missing", output)
+
+    def test_menu_check_failure_is_not_hidden_by_matching_scenarios(self):
+        for mode in ("menu_exit", "menu_missing", "menu_error"):
+            with self.subTest(mode=mode):
+                code, output = self.run_fixture(mode)
+                self.assertNotEqual(code, 0, output)
+                self.assertIn("FAIL", output)
 
     def test_stress_exit_propagates(self):
         code, output = self.run_fixture("stress_exit", stress=True)

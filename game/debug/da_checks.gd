@@ -1,6 +1,7 @@
 extends RefCounted
 ## Checks of the built-in DialogueActions (src/ext/dialogueactions): arithmetic, trigger matching, variables,
-## inserts, set / check, globals, objects, saved variables, line types and instant lines.
+## inserts, set / check, globals, objects, saved variables, line types and instant lines; and MoreTriggers
+## (src/ext/moretriggers) and extensions adding to DialogueActions (on_dialogueactions).
 ## Run by tools/regress.sh (main.gd --driver); prints "DA CHECKS: n passed, m failed" and quits.
 
 const MathScript := preload("res://src/ext/dialogueactions/da_math.gd")
@@ -10,6 +11,9 @@ var _fail := 0
 var _phase := 0
 var _t0 := 0
 var da = null
+var mt = null
+var _mt_breasts := 0
+var _mt_body := 1.0
 
 
 func _check(name: String, ok: bool, detail := "") -> void:
@@ -45,11 +49,13 @@ func step(_frame: int) -> void:
 				_game_checks()
 				_world_checks()
 				_mood_checks()
+				_mt_checks()
 				_t0 = Flash.tick_count
 				_phase = 2
 		2:
 			if Flash.tick_count > _t0 + 80:
 				_game_checks_later()
+				_mt_checks_later()
 				_mood_cycle_i = 0
 				_t0 = Flash.tick_count
 				_phase = 3
@@ -419,6 +425,92 @@ func _game_checks_later() -> void:
 	_check("MASTURBATE_STOP", not gt.masturbating)
 	da.run_code("[FLASH_ff0000]")
 	_check("FLASH starts transparent and fades in", gt.fader.alpha == 0.0 and gt._fade_in)
+
+
+# ---------------------------------------------------------------- MoreTriggers
+
+func _mt_checks() -> void:
+	mt = Extensions.get_extension("moretriggers")
+	_check("MoreTriggers on by default", mt != null and mt.enabled)
+	if mt == null or not mt.enabled:
+		return
+	var her = g.her
+	var st: Dictionary = g.dialogueControl.advancedController._dialogueDataStore
+	_check("SHOCK with power", da.run_code("[SHOCK_100000_150]"))
+	_check("SHOCK with the default power", da.recognises("[SHOCK_2500]") == "SHOCK")
+	_check("LOOK at a point", da.run_code("[LOOK_10_20_100000]"))
+	_check("LOOK_UP", da.recognises("[LOOK_UP_2000]") == "LOOK")
+	_check("vanilla [SHOCK] [WINCE] [LOOK_UP] stay the game's", da.recognises("[SHOCK]") == ""
+		and da.recognises("[WINCE]") == "" and da.recognises("[LOOK_UP]") == "" and da.recognises("[LOOK_DOWN]") == "")
+	_check("CLOSE_MOUTH", da.run_code("[CLOSE_MOUTH]"))
+	_mt_breasts = g.characterControl.breastSize
+	_mt_body = her.bodyScale
+	da.run_code("[GROW_BREASTS_BY_5][GROW_BODY_BY_10]")
+	da.vars.set_value("mt.cuminmouth", 50)
+	_check("mt.cuminmouth sets her cum in mouth", her.cumInMouth == roundi(her.maxCumInMouth * 0.5), str(her.cumInMouth))
+	da.vars.set_value("mt.cuminmouth", "+10")
+	_check("mt.cuminmouth +10 adds", da.vars.value_text("mt.cuminmouth") == "60", da.vars.value_text("mt.cuminmouth"))
+	da.vars.set_value("mt.cuminmouth", 0)
+	da.vars.set_value("mt.vigour", 100)
+	_check("mt.vigour", her.vigour == 1050.0 and da.vars.value_text("mt.vigour") == "100", str(her.vigour))
+	da.vars.set_value("mtA", 3)
+	da.run_code("[BIND_VARIABLES_mtA_mtB]")
+	_check("BIND_VARIABLES copies the value", st.get("mtB") == 3.0, str(st.get("mtB")))
+	da.vars.set_value("mtA", 7)
+	_check("BIND_VARIABLES follows writes", st.get("mtB") == 7.0, str(st.get("mtB")))
+	da.run_code("[UPDATE_RESISTANCE_150]")
+	_check("UPDATE_RESISTANCE clamps to 100", g.introResistance == 100.0, str(g.introResistance))
+	da.run_code("[HIDE_HER]")
+	_check("HIDE_HER hides her and her arms", not her.visible and not her.rightArmContainer.visible)
+	da.run_code("[SHOW_HER][HIDE_HAIR]")
+	_check("SHOW_HER, HIDE_HAIR", her.visible and her.rightArmContainer.visible and not her.hairTop.visible)
+	da.run_code("[SHOW_HAIR][PENIS_ALPHA_MULTIPLY_50]")
+	_check("PENIS_ALPHA", her.hairTop.visible and g.him.penis.alpha == 0.5 and g.him.penis.blendMode == "multiply")
+	da.run_code("[PENIS_ALPHA_NORMAL_100][HER_ALPHA_LAYER_60]")
+	_check("HER_ALPHA, her arm outside her too", is_equal_approx(her.alpha, 0.6) and her.blendMode == "layer"
+		and (her.contains(her.rightArmContainer) or is_equal_approx(her.rightArmContainer.alpha, 0.6)))
+	da.run_code("[HER_ALPHA_NORMAL_100]")
+	da.run_code("[SET_PROGRESSBAR_10_20_0_100_25_FF0000_mtbar]")
+	var bars: Dictionary = mt.screen._bars
+	_check("SET_PROGRESSBAR", bars.has("mtbar") and bars["mtbar"][0].value == 25 and bars["mtbar"][0].x == 10.0)
+	da.vars.set_value("mtbar", 80)
+	_check("progress bar follows its variable", bars.has("mtbar") and bars["mtbar"][0].value == 80)
+	da.run_code("[HIDE_PROGRESSBAR_ALL]")
+	_check("HIDE_PROGRESSBAR_ALL", not bars["mtbar"][0].visible)
+	da.run_code("[KILL_PROGRESSBAR_mtbar]")
+	_check("KILL_PROGRESSBAR", not bars.has("mtbar"))
+	da.run_code("[SHOW_SPLASHSCREEN_nothere.png_0][SHOW_CREDITS]")
+	_check("SHOW_CREDITS starts the credits", mt.screen.credits != null)
+	_check("credits html", mt.screen.CreditsScript.html_to_bbcode("<B>a</b><br/>x &amp; [y]") == "[b]a[/b]
+x & [lb]y]")
+
+
+func _mt_checks_later() -> void:
+	if mt == null or not mt.enabled:
+		return
+	var her = g.her
+	_check("SHOCK holds her shocked eyes", her.eyelidMotion["shock"] == 150.0, str(her.eyelidMotion["shock"]))
+	_check("LOOK holds where she looks", her.currentLookTarget == Vector2(10, 20), str(her.currentLookTarget))
+	_check("CLOSE_MOUTH holds her jaw", is_equal_approx(her.head.jaw.rotation_degrees, Her.closedJawAngle * 0.95),
+		str(her.head.jaw.rotation_degrees))
+	_check("GROW_BREASTS_BY_5", g.characterControl.breastSize == mini(_mt_breasts + 5, 149),
+		"%d -> %d" % [_mt_breasts, g.characterControl.breastSize])
+	_check("GROW_BODY_BY_10", is_equal_approx(her.bodyScale, minf(_mt_body + 0.01, 1.075)), str(her.bodyScale))
+	_check("splash screen gone after its time", mt.screen._splash == null)
+	var c = mt.screen.credits
+	_check("credits roll up", c != null and c._areas[0]["y"] < 700.0, str(c._areas[0]["y"]) if c != null else "")
+	da.run_code("[OPEN_MOUTH][SHOCK_0][LOOK_UP_0]")
+	# switching off: triggers gone, effects undone; on again: back
+	da.run_code("[HIDE_HER]")
+	Extensions.set_enabled("moretriggers", false)
+	_check("MoreTriggers off: its triggers are gone", da.recognises("[SHOCK_100]") == "" and da.vars.mod_value("mt.vigour") == null)
+	_check("MoreTriggers off: she is shown again, credits gone", her.visible and mt.screen == null)
+	Extensions.set_enabled("moretriggers", true)
+	_check("MoreTriggers on again", da.recognises("[SHOCK_100]") == "SHOCK")
+	Extensions.set_enabled("dialogueactions", false)
+	Extensions.set_enabled("dialogueactions", true)
+	_check("DialogueActions on again keeps the extensions' triggers", da.recognises("[SHOCK_100]") == "SHOCK"
+		and da.recognises("[FRIGHTENED_MOOD]") == "FRIGHTENED_MOOD" and da.vars.mod_value("mt.vigour") != null)
 
 
 func _start_line_setup() -> void:

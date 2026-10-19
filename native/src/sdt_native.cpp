@@ -1,9 +1,9 @@
 #include "sdt_native.h"
 
-#include <godot_cpp/classes/geometry2d.hpp>
 #include <godot_cpp/classes/node2d.hpp>
 #include <godot_cpp/classes/script.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/packed_color_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/transform2d.hpp>
@@ -20,6 +20,9 @@ void SDTNative::_bind_methods() {
 					"max_interp_dist"),
 			&SDTNative::build_strand);
 	ClassDB::bind_static_method("SDTNative", D_METHOD("hit_shape", "obj", "point", "hb_gen"), &SDTNative::hit_shape);
+	ClassDB::bind_static_method("SDTNative", D_METHOD("hit_shape_excluding", "obj", "point", "hb_gen", "exclude"),
+			&SDTNative::hit_shape_excluding);
+	ClassDB::bind_static_method("SDTNative", D_METHOD("hit_flat", "obj", "point", "tick"), &SDTNative::hit_flat);
 }
 
 namespace {
@@ -57,32 +60,6 @@ Vector2 inter_point(const Line &l1, const Line &l2, Vector2 mid, Vector2 o1, Vec
 	return Vector2(ix, iy);
 }
 
-// FlashGraphics path building (moveTo / lineTo / curveTo with the same flattening).
-struct Path {
-	std::vector<Vector2> pts;
-	Vector2 pen;
-	void move_to(Vector2 p) {
-		pts.clear();
-		pts.push_back(p);
-		pen = p;
-	}
-	void line_to(Vector2 p) {
-		pts.push_back(p);
-		pen = p;
-	}
-	void curve_to(Vector2 c, Vector2 p1) {
-		Vector2 p0 = pen;
-		int n = std::clamp((int)((p0.distance_to(c) + c.distance_to(p1)) / 3.0f), 2, 24);
-		float inv = 1.0f / n;
-		for (int i = 0; i < n; i++) {
-			float t = (i + 1) * inv;
-			float u = 1.0f - t;
-			pts.push_back(p0 * (u * u) + c * (2.0f * u * t) + p1 * (t * t));
-		}
-		pen = p1;
-	}
-};
-
 // Two-stop linear gradient ("pad" spread) as FlashGraphics.beginGradientFill + graphics_fill.gdshader evaluate it.
 struct Gradient {
 	Transform2D inv; // object space -> gradient space
@@ -105,11 +82,6 @@ struct Gradient {
 	}
 };
 
-struct StrandMesh {
-	std::vector<Vector2> points;
-	std::vector<Color> colors;
-	std::vector<int32_t> indices;
-};
 
 // Copies a std::vector into a packed array in one resize + memcpy (element-wise push_back goes through the
 // engine API and is slow).
@@ -188,23 +160,12 @@ void emit_triangle(StrandMesh &m, const Gradient &g, Vector2 a, Vector2 b, Vecto
 
 } // namespace
 
-Array SDTNative::build_strand(const PackedVector2Array &p_pos, const PackedFloat32Array &p_thickness,
-		const PackedFloat32Array &p_density, const PackedByteArray &p_has_stored, const PackedVector2Array &p_stored,
-		const Color &p_rgb, double p_alpha, double p_max_interp_dist) {
-	StrandMesh mesh;
-	const int n = (int)p_pos.size();
-	Array result;
+void sdt_append_strand_mesh(StrandMesh &mesh, const Vector2 *pos, const float *thick, const float *dens,
+		const uint8_t *has_stored, const Vector2 *stored, int n, const Color &p_rgb, double p_alpha,
+		double p_max_interp_dist) {
 	if (n < 2) {
-		result.push_back(PackedVector2Array());
-		result.push_back(PackedColorArray());
-		result.push_back(PackedInt32Array());
-		return result;
+		return;
 	}
-	const Vector2 *pos = p_pos.ptr();
-	const float *thick = p_thickness.ptr();
-	const float *dens = p_density.ptr();
-	const uint8_t *has_stored = p_has_stored.size() >= n ? p_has_stored.ptr() : nullptr;
-	const Vector2 *stored = p_stored.size() >= n * 2 ? p_stored.ptr() : nullptr;
 
 	// --- Strand.generateInterpolationPoints
 	std::vector<Vector2> dirs(std::max(n + 1, 2));
@@ -260,15 +221,33 @@ Array SDTNative::build_strand(const PackedVector2Array &p_pos, const PackedFloat
 		}
 	}
 
-	// --- Strand.renderStrand: one gradient-filled outline per segment
-	Geometry2D *geo = Geometry2D::get_singleton();
+	// --- Strand.renderStrand. Flash draws each segment as a gradient-filled outline (inside curve, line, outside
+	// curve back, plus the rounded caps) that has to be triangulated. The same outline is a ribbon: both curves are
+	// sampled with the same parameter and joined as a triangle strip, and the caps are fans; no polygon
+	// triangulation needed. Triangles are still split at the gradient's stops, so the colours match exactly.
 	Color c_rgb(p_rgb.r, p_rgb.g, p_rgb.b, 1.0f);
-	Path path;
-	path.pts.reserve(256);
 	mesh.points.reserve(n * 64);
 	mesh.colors.reserve(n * 64);
 	mesh.indices.reserve(n * 128);
-	PackedVector2Array poly;
+	auto bez = [](Vector2 p0, Vector2 c, Vector2 p1, float t) {
+		float u = 1.0f - t;
+		return p0 * (u * u) + c * (2.0f * u * t) + p1 * (t * t);
+	};
+	// as many steps as FlashGraphics.curveTo would flatten the curve into
+	auto steps = [](Vector2 p0, Vector2 c, Vector2 p1) {
+		return std::clamp((int)((p0.distance_to(c) + c.distance_to(p1)) / 3.0f), 2, 24);
+	};
+	// a cap: the region between the chord a-b and the curve a -> (via c) -> b, as a fan from the chord's midpoint
+	auto cap = [&](const Gradient &g, Vector2 a, Vector2 c, Vector2 b) {
+		int k = steps(a, c, b);
+		Vector2 m = (a + b) * 0.5f;
+		Vector2 prev = a;
+		for (int j = 1; j <= k; j++) {
+			Vector2 q = bez(a, c, b, (float)j / k);
+			emit_triangle(mesh, g, m, prev, q);
+			prev = q;
+		}
+	};
 	for (int i = 1; i < n; i++) {
 		Vector2 cur = pos[i], prev = pos[i - 1];
 		Vector2 d(cur.x - prev.x, cur.y - prev.y);
@@ -290,29 +269,41 @@ Array SDTNative::build_strand(const PackedVector2Array &p_pos, const PackedFloat
 		g.c1 = c_rgb;
 		g.c1.a = std::min(1.0, (double)dens[i]) * p_alpha;
 
-		path.move_to(in_off[i - 1]);
-		path.curve_to(in_ip[i - 1], in_off[i]);
+		Vector2 a0 = in_off[i - 1], ac = in_ip[i - 1], a1 = in_off[i];
+		Vector2 b0 = out_off[i - 1], bc = out_ip[i - 1], b1 = out_off[i];
+		int k = std::max(steps(a0, ac, a1), steps(b0, bc, b1));
+		Vector2 pa = a0, pb = b0;
+		for (int j = 1; j <= k; j++) {
+			float t = (float)j / k;
+			Vector2 qa = bez(a0, ac, a1, t), qb = bez(b0, bc, b1, t);
+			emit_triangle(mesh, g, pa, pb, qa);
+			emit_triangle(mesh, g, pb, qb, qa);
+			pa = qa;
+			pb = qb;
+		}
 		if (i == n - 1) {
-			path.curve_to(bottom_cap, out_off[i]);
-		} else {
-			path.line_to(out_off[i]);
+			cap(g, a1, bottom_cap, b1);
 		}
-		path.curve_to(out_ip[i - 1], out_off[i - 1]);
 		if (i == 1) {
-			path.curve_to(top_cap, in_off[0]);
-		}
-		if (path.pts.size() < 3) {
-			continue;
-		}
-		poly = to_packed<PackedVector2Array>(path.pts);
-		PackedInt32Array tri = geo->triangulate_polygon(poly);
-		const int32_t *ti = tri.ptr();
-		const int64_t tn = tri.size();
-		const Vector2 *pp = path.pts.data();
-		for (int64_t k = 0; k + 2 < tn; k += 3) {
-			emit_triangle(mesh, g, pp[ti[k]], pp[ti[k + 1]], pp[ti[k + 2]]);
+			cap(g, b0, top_cap, a0);
 		}
 	}
+}
+
+namespace {
+} // namespace
+
+Array SDTNative::build_strand(const PackedVector2Array &p_pos, const PackedFloat32Array &p_thickness,
+		const PackedFloat32Array &p_density, const PackedByteArray &p_has_stored, const PackedVector2Array &p_stored,
+		const Color &p_rgb, double p_alpha, double p_max_interp_dist) {
+	StrandMesh mesh;
+	const int n = (int)p_pos.size();
+	if (n >= 2) {
+		sdt_append_strand_mesh(mesh, p_pos.ptr(), p_thickness.ptr(), p_density.ptr(),
+				p_has_stored.size() >= n ? p_has_stored.ptr() : nullptr, p_stored.size() >= n * 2 ? p_stored.ptr() : nullptr,
+				n, p_rgb, p_alpha, p_max_interp_dist);
+	}
+	Array result;
 	result.push_back(to_packed<PackedVector2Array>(mesh.points));
 	result.push_back(to_packed<PackedColorArray>(mesh.colors));
 	result.push_back(to_packed<PackedInt32Array>(mesh.indices));
@@ -323,13 +314,14 @@ Array SDTNative::build_strand(const PackedVector2Array &p_pos, const PackedFloat
 
 namespace {
 
-enum class Kind { SPRITE, SHAPE, OTHER };
+enum class Kind { SPRITE, SHAPE, OTHER, SWEAT };
 
 struct Names {
 	StringName _hb_gen = "_hb_gen", _hb = "_hb", _hit_bounds = "_hit_bounds", _graphics = "_graphics", hit = "hit",
 			   _children = "_children", _clip_depth = "_clip_depth", _masking = "_masking", _clip_proxies = "_clip_proxies",
 			   _depth = "_depth", _entry = "_entry", _library = "_library", _hit_masks = "_hit_masks",
-			   _hit_masks_loaded = "_hit_masks_loaded", hit_mask_test = "hit_mask_test", _hit_shape = "_hit_shape";
+			   _hit_masks_loaded = "_hit_masks_loaded", hit_mask_test = "hit_mask_test", _hit_shape = "_hit_shape",
+			   has_content = "has_content", bounds = "bounds";
 	String hm = "hm", x = "x", y = "y";
 };
 
@@ -351,6 +343,10 @@ Kind kind_of(Object *o) {
 	Ref<Script> s = Object::cast_to<Script>(script);
 	while (s.is_valid()) {
 		StringName gn = s->get_global_name();
+		if (gn == StringName("Sweat")) {
+			k = Kind::SWEAT;
+			break;
+		}
 		if (gn == StringName("FlashSprite")) {
 			k = Kind::SPRITE;
 			break;
@@ -369,6 +365,9 @@ Kind kind_of(Object *o) {
 }
 
 bool hit_shape_rec(Object *o, Vector2 p, int64_t hb_gen);
+
+// The object a hit test skips (hit_shape_excluding: a sweat droplet testing the body part it sits on).
+Object *g_hit_exclude = nullptr;
 
 // FlashSprite._clip_allows: children under a timeline clip mask only hit inside the mask.
 bool clip_allows(Object *c, Vector2 p, const Dictionary &clips, int64_t hb_gen) {
@@ -423,6 +422,7 @@ bool hit_shape_rec(Object *o, Vector2 p, int64_t hb_gen) {
 			}
 			return ((masks.ptr()[byte_i] >> (bit & 7)) & 1) == 1;
 		}
+		case Kind::SWEAT:
 		case Kind::SPRITE: {
 			Rect2 hb;
 			if ((int64_t)o->get(N._hb_gen) == hb_gen) {
@@ -443,7 +443,7 @@ bool hit_shape_rec(Object *o, Vector2 p, int64_t hb_gen) {
 			bool clips_read = false;
 			for (int64_t i = children.size() - 1; i >= 0; i--) {
 				Object *c = children[i];
-				if (c == nullptr) {
+				if (c == nullptr || c == g_hit_exclude) {
 					continue;
 				}
 				// Test the child first (it rejects cheaply on its cached bounds); the mask / clip checks, which do
@@ -474,6 +474,197 @@ bool hit_shape_rec(Object *o, Vector2 p, int64_t hb_gen) {
 	}
 }
 
+
+// ------------------------------------------------------------------------------------------------ flattened tests
+// hit_flat: the first test of a root in a tick walks its tree once and keeps a flat list of its shapes (hit mask,
+// transform from the root's space, bounds); later tests in the same tick are plain math on that list. Sweat
+// droplets are left out (used by the droplets' own tests: is this point on the body part's skin?).
+
+struct FlatLeaf {
+	Transform2D inv; // root space -> leaf space
+	Rect2 bounds;    // in root space (quick reject)
+	bool call = false; // true: ask the object (graphics.hit / _hit_shape), false: hit mask
+	ObjectID obj;
+	StringName method;
+	PackedByteArray masks;
+	int64_t ex = 0, ey = 0, w = 0, h = 0, byte0 = 0;
+	std::vector<int> clips; // every one of these clip groups must hit too
+};
+
+struct FlatRoot {
+	int64_t tick = -1;
+	Rect2 bounds;
+	bool bounds_ok = false;
+	std::vector<FlatLeaf> leaves;
+	std::vector<std::vector<FlatLeaf>> groups; // clip mask contents
+};
+
+std::unordered_map<uint64_t, FlatRoot> g_flat;
+
+Rect2 xform_rect(const Transform2D &t, const Rect2 &r) {
+	Vector2 a = t.xform(r.position), b = t.xform(r.position + Vector2(r.size.x, 0)),
+			c = t.xform(r.position + Vector2(0, r.size.y)), d = t.xform(r.position + r.size);
+	Vector2 mn(std::min(std::min(a.x, b.x), std::min(c.x, d.x)), std::min(std::min(a.y, b.y), std::min(c.y, d.y)));
+	Vector2 mx(std::max(std::max(a.x, b.x), std::max(c.x, d.x)), std::max(std::max(a.y, b.y), std::max(c.y, d.y)));
+	return Rect2(mn, mx - mn);
+}
+
+const Rect2 EVERYWHERE(-1e9, -1e9, 2e9, 2e9);
+
+void flatten(FlatRoot &root, std::vector<FlatLeaf> &out, Object *o, const Transform2D &to_root,
+		const std::vector<int> &clips);
+
+// The children of sprite o (to_root: o's space -> root space), with the clip masks of timeline clipping.
+void flatten_children(FlatRoot &root, std::vector<FlatLeaf> &out, Object *o, const Transform2D &to_root,
+		const std::vector<int> &clips) {
+	Names &N = names();
+	Array children = o->get(N._children);
+	Dictionary clip_proxies;
+	bool clips_read = false;
+	for (int64_t i = 0; i < children.size(); i++) {
+		Object *c = children[i];
+		if (c == nullptr) {
+			continue;
+		}
+		if ((int64_t)c->get(N._clip_depth) > 0) {
+			continue; // a clip mask itself does not hit
+		}
+		Array masking = c->get(N._masking);
+		if (!masking.is_empty()) {
+			continue; // masks do not hit
+		}
+		Node2D *cn = Object::cast_to<Node2D>(c);
+		std::vector<int> cc = clips;
+		int64_t d = c->get(N._depth);
+		if (d >= 0) {
+			if (!clips_read) {
+				clip_proxies = o->get(N._clip_proxies);
+				clips_read = true;
+			}
+			Array keys = clip_proxies.keys();
+			for (int64_t k = 0; k < keys.size(); k++) {
+				Object *m = keys[k];
+				if (m == nullptr) {
+					continue;
+				}
+				if (d > (int64_t)m->get(N._depth) && d <= (int64_t)m->get(N._clip_depth)) {
+					Node2D *mn = Object::cast_to<Node2D>(m);
+					std::vector<FlatLeaf> tmp;
+					flatten(root, tmp, m, to_root * mn->get_transform(), {});
+					root.groups.push_back(std::move(tmp));
+					cc.push_back((int)root.groups.size() - 1);
+					break;
+				}
+			}
+		}
+		flatten(root, out, c, to_root * cn->get_transform(), cc);
+	}
+}
+
+FlatLeaf call_leaf(Object *o, const StringName &method, const Transform2D &to_root, const std::vector<int> &clips) {
+	FlatLeaf l;
+	l.inv = to_root.affine_inverse();
+	l.clips = clips;
+	l.call = true;
+	l.obj = ObjectID(o->get_instance_id());
+	l.method = method;
+	l.bounds = EVERYWHERE;
+	return l;
+}
+
+void flatten(FlatRoot &root, std::vector<FlatLeaf> &out, Object *o, const Transform2D &to_root,
+		const std::vector<int> &clips) {
+	Names &N = names();
+	switch (kind_of(o)) {
+		case Kind::SWEAT:
+			return;
+		case Kind::SHAPE: {
+			Dictionary e = o->get(N._entry);
+			if (e.is_empty() || !e.has(N.hm)) {
+				return;
+			}
+			Object *lib = o->get(N._library);
+			if (lib == nullptr) {
+				return;
+			}
+			if (!(bool)lib->get(N._hit_masks_loaded)) {
+				out.push_back(call_leaf(o, N._hit_shape, to_root, clips)); // rare: ask the object
+				return;
+			}
+			FlatLeaf l;
+			l.inv = to_root.affine_inverse();
+			l.clips = clips;
+			Array hm = e[N.hm];
+			double ex = e[N.x], ey = e[N.y];
+			l.ex = (int64_t)std::floor(ex);
+			l.ey = (int64_t)std::floor(ey);
+			l.byte0 = hm[0];
+			l.w = hm[1];
+			l.h = hm[2];
+			l.masks = lib->get(N._hit_masks);
+			// the hit test floors p - (x, y): the mask covers [x, x + w) in the shape's space
+			l.bounds = xform_rect(to_root, Rect2(ex - 1, ey - 1, (double)l.w + 2, (double)l.h + 2));
+			out.push_back(l);
+			return;
+		}
+		case Kind::SPRITE: {
+			Variant gv = o->get(N._graphics);
+			Object *gr = gv;
+			if (gr != nullptr && (bool)gr->call(N.has_content)) {
+				FlatLeaf l = call_leaf(gr, N.hit, to_root, clips);
+				Rect2 gb = gr->call(N.bounds);
+				l.bounds = xform_rect(to_root, gb.grow(1));
+				out.push_back(l);
+			}
+			flatten_children(root, out, o, to_root, clips);
+			return;
+		}
+		default:
+			out.push_back(call_leaf(o, N._hit_shape, to_root, clips));
+			return;
+	}
+}
+
+bool leaf_hit(const FlatLeaf &l, Vector2 p) {
+	if (!l.bounds.has_point(p)) {
+		return false;
+	}
+	Vector2 q = l.inv.xform(p);
+	if (l.call) {
+		Object *o = ObjectDB::get_instance(l.obj);
+		return o != nullptr && (bool)o->call(l.method, q);
+	}
+	int64_t x = (int64_t)std::floor(q.x - (double)l.ex) ;
+	int64_t y = (int64_t)std::floor(q.y - (double)l.ey);
+	if (x < 0 || y < 0 || x >= l.w || y >= l.h) {
+		return false;
+	}
+	int64_t bit = y * l.w + x;
+	int64_t byte_i = l.byte0 + (bit >> 3);
+	if (byte_i >= l.masks.size()) {
+		return false;
+	}
+	return ((l.masks.ptr()[byte_i] >> (bit & 7)) & 1) == 1;
+}
+
+bool leaves_hit(const FlatRoot &root, const std::vector<FlatLeaf> &leaves, Vector2 p) {
+	for (const FlatLeaf &l : leaves) {
+		if (!leaf_hit(l, p)) {
+			continue;
+		}
+		bool ok = true;
+		for (int gi : l.clips) {
+			if (!leaves_hit(root, root.groups[gi], p)) {
+				ok = false;
+				break;
+			}
+		}
+		if (ok) {
+			return true;
+		}
+	}
+	return false;
+}
 } // namespace
 
 bool SDTNative::hit_shape(Object *p_obj, const Vector2 &p_point, int64_t p_hb_gen) {
@@ -481,4 +672,77 @@ bool SDTNative::hit_shape(Object *p_obj, const Vector2 &p_point, int64_t p_hb_ge
 		return false;
 	}
 	return hit_shape_rec(p_obj, p_point, p_hb_gen);
+}
+
+bool SDTNative::hit_flat(Object *p_obj, const Vector2 &p_point, int64_t p_tick) {
+	return sdt_hit_flat(p_obj, p_point, p_tick);
+}
+
+// The flattened root for obj in this tick (built on first use).
+static FlatRoot &flat_root(Object *p_obj, int64_t p_tick) {
+	FlatRoot &root = g_flat[p_obj->get_instance_id()];
+	if (root.tick != p_tick) {
+		root.tick = p_tick;
+		root.leaves.clear();
+		root.groups.clear();
+		root.bounds_ok = false;
+		flatten(root, root.leaves, p_obj, Transform2D(), {});
+	}
+	return root;
+}
+
+Rect2 sdt_flat_bounds(Object *p_obj, int64_t p_tick) {
+	if (p_obj == nullptr) {
+		return Rect2();
+	}
+	FlatRoot &root = flat_root(p_obj, p_tick);
+	if (!root.bounds_ok) {
+		bool first = true;
+		Rect2 r;
+		for (const FlatLeaf &l : root.leaves) {
+			if (l.call) {
+				continue; // unbounded entries (graphics, text) do not count
+			}
+			r = first ? l.bounds : r.merge(l.bounds);
+			first = false;
+		}
+		root.bounds = r;
+		root.bounds_ok = true;
+	}
+	return root.bounds;
+}
+
+bool sdt_hit_flat(Object *p_obj, const Vector2 &p_point, int64_t p_tick) {
+	if (p_obj == nullptr) {
+		return false;
+	}
+	FlatRoot &root = g_flat[p_obj->get_instance_id()];
+	if (root.tick != p_tick) {
+		root.tick = p_tick;
+		root.leaves.clear();
+		root.groups.clear();
+		root.bounds_ok = false;
+		flatten(root, root.leaves, p_obj, Transform2D(), {});
+	}
+	if (g_flat.size() > 256) { // forget roots not tested lately
+		for (auto it = g_flat.begin(); it != g_flat.end();) {
+			if (it->second.tick < p_tick - 1) {
+				it = g_flat.erase(it);
+			} else {
+				++it;
+			}
+		}
+		return sdt_hit_flat(p_obj, p_point, p_tick);
+	}
+	return leaves_hit(root, root.leaves, p_point);
+}
+
+bool SDTNative::hit_shape_excluding(Object *p_obj, const Vector2 &p_point, int64_t p_hb_gen, Object *p_exclude) {
+	if (p_obj == nullptr) {
+		return false;
+	}
+	g_hit_exclude = p_exclude;
+	bool hit = hit_shape_rec(p_obj, p_point, p_hb_gen);
+	g_hit_exclude = nullptr;
+	return hit;
 }

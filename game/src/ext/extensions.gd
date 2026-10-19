@@ -13,6 +13,7 @@ extends RefCounted
 const BUILTIN: Array[String] = [
 	"res://src/ext/dialogueactions/dialogue_actions.gd",
 	"res://src/ext/moremoods/moremoods.gd",
+	"res://src/ext/moretriggers/moretriggers.gd",
 ]
 
 const CONFIG_FILE := "extensions.cfg"
@@ -37,6 +38,7 @@ static var _installed := false
 static var _events: Dictionary = {}   # event name -> [[extension, Callable]]
 static var _widgets: Array = []      # [extension, FlashDisplayObject]
 static var _keys: Dictionary = {}    # Flash key code -> [[extension, Callable, label]]
+static var _da_addons: Array = []    # [extension, Callable(da)]: additions to DialogueActions (on_dialogueactions)
 
 ## Flash key codes the vanilla game uses during play (DT.keyPressed), for clash warnings.
 const VANILLA_KEYS := [16, 17, 191, 32, 65, 80, 79, 73, 85, 89, 67, 88, 66, 72, 75, 84, 83, 74]
@@ -250,6 +252,11 @@ static func _disable(ext: SDTExtension) -> void:
 	Hooks.remove_owner(ext.id)
 	CharCode.remove_owner(ext.id)
 	Moods.unregister_owner(ext.id)
+	SDTMenu.remove_owner(ext.id)
+	_da_addons = _da_addons.filter(func(x): return x[0] != ext)
+	var da: SDTExtension = by_id.get("dialogueactions")
+	if da != null and da != ext and da.enabled:
+		da.remove_owner(ext.id)
 	for w in _widgets.filter(func(x): return x[0] == ext):
 		if is_instance_valid(w[1]) and w[1]._flash_parent != null:
 			w[1]._flash_parent.removeChild(w[1])
@@ -487,6 +494,19 @@ static func _add_key(ext: SDTExtension, keycode: int, fn: Callable, label: Strin
 	for other in _keys[keycode]:
 		push_warning("extension %s: key %d (%s) is also used by %s (%s)" % [ext.id, keycode, label, other[0].id, other[2]])
 	_keys[keycode].append([ext, fn, label])
+
+
+static func _add_da_addon(ext: SDTExtension, setup: Callable) -> void:
+	_da_addons.append([ext, setup])
+	var da: SDTExtension = by_id.get("dialogueactions")
+	if da != null and da != ext and da.enabled:
+		da.run_addon(ext.id, setup)
+
+
+## The DialogueActions additions of enabled extensions, in registration order (DialogueActions runs them when it
+## is switched on).
+static func da_addons() -> Array:
+	return _da_addons.filter(func(x): return x[0].enabled)
 
 
 static func _add_widget(ext: SDTExtension, w: FlashDisplayObject) -> void:

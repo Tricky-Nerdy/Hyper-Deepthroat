@@ -221,14 +221,14 @@ var cumInMouth: int = 0
 var maxCumInMouth: int = 40
 var droolingCum := false
 var startedCumDrool := false
-var currentCumDrool: Strand
+var currentCumDrool   # Strand, or NativeStrand with the native fluid system (StrandControl)
 var cumDroolTimer: int = 0
 var cumDrool: int = 0
 var cumDroolNum: int = 0
 var cumDroolLinkFreq: int = 4
 var droolingSpit := false
 var startedSpitDrool := false
-var currentSpitDrool: Strand
+var currentSpitDrool   # Strand or NativeStrand
 var spitDroolTimer: int = 0
 var spitDroolLinkFreq: int = 8
 var gagDroolTimer: int = 0
@@ -237,7 +237,7 @@ var fullCumInMouth: int = 25
 var minNostrilSpray: int = 5
 var nostrilSpraying := false
 var nostrilSprayToggle := false
-var currentNostrilSpray: Strand
+var currentNostrilSpray   # Strand or NativeStrand
 var mouthFull := false
 var held := false
 var hilt := false
@@ -884,9 +884,9 @@ func move(targetPos: float, tilt: float) -> float:
 	Sweat.staticTick()
 	if randf() < g.breathLevel / g.breathLevelMax and randf() > 0.9:
 		if randf() > 0.5:
-			Sweat.new(head, Vector2(21, -65), Vector2(150, 100), [rightArmContainer.upperArm, torso.back, torso.midLayer.chest, torso.midLayer.rightBreast.hitArea, torso.leg])
+			Sweat.spawn(head, Vector2(21, -65), Vector2(150, 100), [rightArmContainer.upperArm, torso.back, torso.midLayer.chest, torso.midLayer.rightBreast.hitArea, torso.leg])
 		else:
-			Sweat.new(torso.back, Vector2(110, -230), Vector2(320, 100), [torso.midLayer.chest, torso.midLayer.rightBreast.hitArea, torso.leg])
+			Sweat.spawn(torso.back, Vector2(110, -230), Vector2(320, 100), [torso.midLayer.chest, torso.midLayer.rightBreast.hitArea, torso.leg])
 	if mouseHeld:
 		if not g.penisOut and not g.handJobMode:
 			if penisOutDelay < 5:

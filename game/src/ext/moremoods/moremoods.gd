@@ -109,6 +109,7 @@ func _enable() -> void:
 	for m in MOODS:
 		if not m in VANILLA:
 			Moods.register(m, id)
+	Moods.selectable_provider = selectable
 	face = FaceScript.new(self)
 	face.eyeroll_mode = get_setting("startingeyerollmode")
 	face.eyelid_mode = get_setting("startingeyelidmode")
@@ -145,6 +146,8 @@ func _enable() -> void:
 
 
 func _disable() -> void:
+	if Moods.selectable_provider == selectable:
+		Moods.selectable_provider = Callable()
 	if behaviour != null:
 		behaviour.remove()
 	if ui != null:
@@ -217,17 +220,15 @@ func _load_code_mood(v: String) -> void:
 		g.her.setMood(m)
 
 
+## [<MOOD>_MOOD] for the added moods (with DialogueActions).
 func _register_triggers() -> void:
-	var da = Extensions.get_extension("dialogueactions")
-	if da == null or not da.enabled:
-		push_warning("moremoods: DialogueActions is off, the [<MOOD>_MOOD] triggers are not available")
-		return
-	for m in MOODS:
-		if m in VANILLA:
-			continue
-		var name: String = m
-		if not da.has_trigger(name.to_upper() + "_MOOD", 0):
-			da.register_trigger(name.to_upper() + "_MOOD", 0, func(_a): g.her.setMood(name))
+	on_dialogueactions(func(da):
+		for m in MOODS:
+			if m in VANILLA:
+				continue
+			var name: String = m
+			if not da.has_trigger(name.to_upper() + "_MOOD", 0):
+				da.register_trigger(name.to_upper() + "_MOOD", 0, func(_a): g.her.setMood(name)))
 
 
 # ---------------------------------------------------------------- selector

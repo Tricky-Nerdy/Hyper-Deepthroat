@@ -7,6 +7,8 @@
 #include <godot_cpp/core/defs.hpp>
 #include <godot_cpp/godot.hpp>
 
+#include "fluids.h"
+#include "sweat.h"
 #include "sdt_native.h"
 #include "swf_file.h"
 
@@ -16,6 +18,8 @@ void initialize_sdt_native(ModuleInitializationLevel p_level) {
 	}
 	GDREGISTER_CLASS(SDTNative);
 	GDREGISTER_CLASS(SWFFile);
+	GDREGISTER_CLASS(SDTFluids);
+	GDREGISTER_CLASS(SDTSweat);
 }
 
 void uninitialize_sdt_native(ModuleInitializationLevel p_level) {

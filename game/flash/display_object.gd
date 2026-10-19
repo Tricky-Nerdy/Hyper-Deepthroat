@@ -38,6 +38,12 @@ var _proxy: CanvasItem = null
 var _listeners: Dictionary = {}
 
 
+func _init() -> void:
+	# POSTINITIALIZE is not reliable for script-created nodes. Register in construction
+	# as well as on EXIT_TREE, including objects never added to a tree.
+	off_tree[get_instance_id()] = true
+
+
 # ---------------------------------------------------------------- tree helpers
 
 ## Flash parent container (DisplayObject.parent).
@@ -458,6 +464,10 @@ func hitTestPoint(x: float, y: float, shape_flag: bool = false) -> bool:
 	if not shape_flag:
 		return getBounds(null).has_point(Vector2(x, y))
 	var lp := flash_global_transform().affine_inverse() * Vector2(x, y)
+	if hit_exclude != null:
+		if native_exclude:
+			return ClassDB.class_call_static(&"SDTNative", &"hit_shape_excluding", self, lp, hb_gen, hit_exclude)
+		return _hit_shape(lp)
 	if native:
 		return ClassDB.class_call_static(&"SDTNative", &"hit_shape", self, lp, hb_gen)
 	return _hit_shape(lp)
@@ -465,6 +475,11 @@ func hitTestPoint(x: float, y: float, shape_flag: bool = false) -> bool:
 
 ## The native extension (native/, game/bin/) is used for hot paths when loaded; --nonative forces the GDScript code.
 static var native: bool = ClassDB.class_exists(&"SDTNative") and not "--nonative" in OS.get_cmdline_user_args()
+static var native_exclude: bool = native and ClassDB.class_has_method(&"SDTNative", &"hit_shape_excluding")
+
+## Port addition: an object shape hit tests skip while set (a sweat droplet testing the body part it sits on; the
+## original took the droplet off the display list for that, which is slow here).
+static var hit_exclude: FlashDisplayObject = null
 
 
 ## p is in this object's local space.

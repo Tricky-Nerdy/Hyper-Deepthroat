@@ -39,3 +39,6 @@ __pycache__/
 /game/bin/*.framework/
 /game/bin/*.xcframework/
 /game/export_credentials.cfg
+
+# Native objects are separated by build target.
+/native/build/

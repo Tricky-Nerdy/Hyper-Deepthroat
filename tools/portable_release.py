@@ -63,18 +63,36 @@ def source_manifest() -> list[dict]:
 
 def copy(source: Path, destination: Path) -> None:
     if source.is_symlink() or not source.is_file():
-        raise ValueError(f"Expected regular source file: {source.relative_to(ROOT)}")
+        raise ValueError(f"Expected regular source file: {source}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, destination)
 
 
-def stage(destination: Path) -> None:
+def stage(destination: Path, source_root: Path | None = None, *, disable_file_logging=False) -> None:
+    source_root = ROOT if source_root is None else source_root
     destination.mkdir(parents=True, exist_ok=True)
     for name in WORKBENCH:
-        copy(ROOT / "workbench" / name, destination / name)
+        copy(source_root / "workbench" / name, destination / name)
     for name in CORE:
-        copy(ROOT / "game/src/ext/loader" / name, destination / "core" / name)
-    copy(ROOT / "LICENSE", destination / "LICENSE.txt")
+        copy(source_root / "game/src/ext/loader" / name, destination / "core" / name)
+    copy(source_root / "LICENSE", destination / "LICENSE.txt")
+    if disable_file_logging:
+        # Set this before engine startup; --log-file /dev/null is not compatible with Godot's rotation.
+        project = destination / "project.godot"
+        result, section, found = [], "", False
+        for line in project.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                section = stripped
+                result.append(line)
+                if section == "[debug]":
+                    found = True
+                    result += ["file_logging/enable_file_logging=false", "file_logging/enable_file_logging.pc=false"]
+            elif section != "[debug]" or not re.match(r"\s*file_logging/enable_file_logging(?:\.pc)?\s*=", line):
+                result.append(line)
+        if not found:
+            result += ["", "[debug]", "file_logging/enable_file_logging=false", "file_logging/enable_file_logging.pc=false"]
+        project.write_text("\n".join(result) + "\n", encoding="utf-8")
     lines = []
     for i, (target, (platform, _, options)) in enumerate(TARGETS.items()):
         lines.extend([
@@ -87,6 +105,34 @@ def stage(destination: Path) -> None:
             lines.append(f"{key}={json.dumps(value)}")
         lines.append("")
     (destination / "export_presets.cfg").write_text("\n".join(lines), encoding="utf-8")
+
+
+def install_stage(staged: Path, destination: Path) -> None:
+    """Copy completely before swapping; recover a previous tree after an interrupted swap."""
+    pending = destination.with_name(".project-next")
+    previous = destination.with_name(".project-previous")
+    if previous.exists():
+        if not destination.exists():
+            previous.replace(destination)
+        else:
+            shutil.rmtree(previous)
+    if pending.exists():
+        shutil.rmtree(pending)
+    try:
+        shutil.copytree(staged, pending)
+        if destination.exists():
+            destination.replace(previous)
+        try:
+            pending.replace(destination)
+        except OSError:
+            if previous.exists():
+                previous.replace(destination)
+            raise
+        if previous.exists():
+            shutil.rmtree(previous)
+    finally:
+        if pending.exists():
+            shutil.rmtree(pending)
 
 
 def verify(godot: str, staged: Path, output: Path) -> dict:
@@ -219,7 +265,11 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=ROOT / "build/portable")
     parser.add_argument("--godot", default=os.environ.get("GODOT", "godot"))
     parser.add_argument("--target", action="append", choices=(*TARGETS, "all"))
+    parser.add_argument("--source-root", type=Path, help="neutral source fixture root (stage only)")
+    parser.add_argument("--disable-file-logging", action="store_true", help="disable duplicate engine logs in a staged debug project")
     args = parser.parse_args()
+    if (args.source_root is not None or args.disable_file_logging) and args.action != "stage":
+        parser.error("source-root/file-logging overrides are supported only by neutral staging")
     output = args.output.resolve()
     # Never delete/overwrite a source tree through --output.
     if output in ROOT.parents or (output.is_relative_to(ROOT) and not output.is_relative_to(ROOT / "build")):
@@ -239,12 +289,11 @@ def main() -> int:
         return 0 if report["ok"] else 1
     with tempfile.TemporaryDirectory(prefix="portable-stage-") as temp:
         staged = Path(temp)
-        stage(staged)
+        stage(staged, args.source_root.resolve() if args.source_root is not None else None,
+              disable_file_logging=args.disable_file_logging)
         if args.action == "stage":
             destination = output / "project"
-            if destination.exists():
-                shutil.rmtree(destination)
-            shutil.copytree(staged, destination)
+            install_stage(staged, destination)
             print(f"Staged neutral project at {destination}")
             return 0
         checks = verify(args.godot, staged, output)

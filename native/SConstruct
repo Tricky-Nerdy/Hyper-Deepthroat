@@ -12,7 +12,9 @@ env = SConscript("godot-cpp/SConstruct")
 # Keep filenames consistent across platforms (Unix would otherwise add a "lib" prefix).
 env["SHLIBPREFIX"] = ""
 env.Append(CPPPATH=["src/"])
-sources = Glob("src/*.cpp")
+# objects per target (build/template_debug, build/template_release): a release build must not reuse debug objects
+VariantDir("build/" + env["target"], "src", duplicate=0)
+sources = Glob("build/" + env["target"] + "/*.cpp")
 library = env.SharedLibrary("../game/bin/sdt_native{}{}".format(env["suffix"], env["SHLIBSUFFIX"]), source=sources)
 env.NoCache(library)
 Default(library)

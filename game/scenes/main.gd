@@ -70,6 +70,10 @@ func _ready() -> void:
 	Flash.attach_stage(self)
 	Flash.stage.addChild(DT.new())
 	add_child(preload("res://scenes/fps_counter.gd").new())
+	if not Extensions.vanilla_mode:
+		var local_ai := preload("res://src/integrations/ai/review_panel.gd").new()
+		local_ai.profile_path = FlashSharedObject.save_dir.path_join("local_ai/providers.json")
+		add_child(local_ai)
 
 
 func _exit_tree() -> void:

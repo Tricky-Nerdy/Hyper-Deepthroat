@@ -992,10 +992,10 @@ func _after_movement_sounds() -> void:
 	_action_tracker = her.offActionTimer
 	if m == "Nervous" and randf() > 0.99:
 		if randf() > 0.5:
-			Sweat.new(her.head, Vector2(21, -65), Vector2(150, 100), [her.rightArmContainer.upperArm, her.torso.back,
+			Sweat.spawn(her.head, Vector2(21, -65), Vector2(150, 100), [her.rightArmContainer.upperArm, her.torso.back,
 				her.torso.midLayer.chest, her.torso.midLayer.rightBreast.hitArea, her.torso.leg])
 		else:
-			Sweat.new(her.torso.back, Vector2(110, -230), Vector2(320, 100), [her.torso.midLayer.chest,
+			Sweat.spawn(her.torso.back, Vector2(110, -230), Vector2(320, 100), [her.torso.midLayer.chest,
 				her.torso.midLayer.rightBreast.hitArea, her.torso.leg])
 
 

@@ -7,6 +7,7 @@ extends Node
 ## between ticks.
 
 const BASE_LIBRARY := "res://assets/sdt"
+const ContentPaths := preload("res://flash/content_paths.gd")
 
 const SHAPE_SHADERS := {
 	"normal": preload("res://flash/shaders/shape_mix.gdshader"),
@@ -35,6 +36,8 @@ var base_library: FlashLibrary
 ## Frames per second of the logic tick (Flash frame rate).
 var frame_rate: float = 30.0
 var tick_count: int = 0
+## Ticks between mouse-over checks while the mouse is still (see the tick).
+const MOUSE_OVER_TICKS := 3
 ## When true, timelines and ENTER_FRAME listeners are not ticked (debug tools / pause screens).
 var paused := false
 
@@ -406,7 +409,7 @@ func _physics_process(_delta: float) -> void:
 	if tick_count % 15 == 0:
 		FlashDisplayObject.hb_gen += 1   # periodically rebuild loose hit-test bounds tight
 	var prof := profiling
-	var t0 := Time.get_ticks_usec() if prof else 0
+	var t0 := Time.get_ticks_usec()
 	var snap: Dictionary = _prof.duplicate() if prof else {}
 	FlashLibrary.poll_streaming()
 	if _deterministic:
@@ -422,7 +425,8 @@ func _physics_process(_delta: float) -> void:
 			mc._advance()
 		else:
 			_playing.erase(mc)
-	var t1 := Time.get_ticks_usec() if prof else 0
+	var t1 := Time.get_ticks_usec()
+	_perf_add("#timelines", t1 - t0)
 	# 2. ENTER_FRAME listeners (game logic).
 	var stale := false
 	for e in _enter_frame.duplicate():
@@ -437,6 +441,8 @@ func _physics_process(_delta: float) -> void:
 			else:
 				cb.call(FlashEvent.new(FlashEvent.ENTER_FRAME))
 			var dt := Time.get_ticks_usec() - ts
+			var scr = e[0].get_script()   # per script totals for the PERF line
+			_perf_listeners[scr] = _perf_listeners.get(scr, 0) + dt
 			if prof or dt > _slowest_listener_us:
 				var obj = e[0]
 				var key := "%s.%s" % [obj.get_script().get_global_name() if obj.get_script() else obj.get_class(), cb.get_method()] 					if is_instance_valid(obj) else "(freed)." + str(cb.get_method())
@@ -446,22 +452,29 @@ func _physics_process(_delta: float) -> void:
 		_enter_frame = _enter_frame.filter(func(e): return is_instance_valid(e[0]))
 	# 2b. Callbacks that run after the game's tick, before masks follow the moved objects (see tick_after).
 	for cb in tick_after:
+		var ts := Time.get_ticks_usec()
 		cb.call()
-	var t2 := Time.get_ticks_usec() if prof else 0
+		_perf_add("after:" + cb.get_method(), Time.get_ticks_usec() - ts)
+	var t2 := Time.get_ticks_usec()
 	# 3. Masks follow the (possibly moved) objects.
 	for p in _mask_proxies.keys():
 		if is_instance_valid(p):
 			p.refresh()
 		else:
 			_mask_proxies.erase(p)
-	var t3 := Time.get_ticks_usec() if prof else 0
+	var t3 := Time.get_ticks_usec()
 	for g in _groups.keys():
 		if is_instance_valid(g):
 			g.update_layout()
 		else:
 			_groups.erase(g)
-	var t4 := Time.get_ticks_usec() if prof else 0
-	_update_mouse_over()
+	var t4 := Time.get_ticks_usec()
+	_perf_add("#masks", t3 - t2)
+	_perf_add("#groups", t4 - t3)
+	# objects moving under a still mouse: a hit search costs up to ~0.2 ms, so look every few ticks (mouse motion
+	# updates it at once, see _handle_input)
+	if tick_count % MOUSE_OVER_TICKS == 0:
+		_update_mouse_over()
 	_finish_lazy_detach()
 	in_tick = false
 	_free_orphans()
@@ -528,6 +541,8 @@ func _setup_frame_monitor() -> void:
 	for arg in OS.get_cmdline_user_args():
 		if arg.begins_with("--hitch-ms="):
 			HITCH_MS = int(arg.substr(11))
+		elif arg.begins_with("--perf-seconds="):
+			PERF_SECONDS = float(arg.substr(15))
 	for k in ["process_first", "process_last"]:
 		var n := _PhaseNode.new()
 		n.key = k
@@ -536,6 +551,65 @@ func _setup_frame_monitor() -> void:
 		add_child(n)
 	RenderingServer.frame_pre_draw.connect(func(): _ph["pre_draw"] = Time.get_ticks_usec())
 	RenderingServer.frame_post_draw.connect(_end_frame)
+	_log_system.call_deferred()
+
+
+## One "SYSTEM" line at startup with what matters for performance reports (testers send their godot.log).
+func _log_system() -> void:
+	var v := Engine.get_version_info()
+	var vsync: String = ["off", "on", "adaptive", "mailbox"][clampi(DisplayServer.window_get_vsync_mode(), 0, 3)]
+	print("SYSTEM Godot %s (%s build) | %s | %s %s | CPU %s, %d threads | native %s | window %s on a %s screen, vsync %s, max fps %d" % [
+		v["string"], "debug" if OS.is_debug_build() else "release", RenderingServer.get_current_rendering_method(),
+		RenderingServer.get_video_adapter_vendor(), RenderingServer.get_video_adapter_name(), OS.get_processor_name(),
+		OS.get_processor_count(), "on" if ClassDB.class_exists(&"SDTNative") and not "--nonative" in OS.get_cmdline_user_args() else "OFF",
+		DisplayServer.window_get_size(), DisplayServer.screen_get_size(), vsync, Engine.max_fps])
+
+
+# Every PERF_SECONDS of play, one "PERF" line: frame rate, slow frames, tick and render time, worst frame, so a
+# steady low frame rate (no single frame slow enough for a HITCH line) shows in the log too.
+var PERF_SECONDS := 30.0   # --perf-seconds=N to change the interval
+var _perf := {"frames": 0, "us": 0, "slow": 0, "tick_us": 0, "ticks": 0, "draw_us": 0, "worst": 0, "start": 0}
+var _perf_listeners: Dictionary = {}   # script (or "ext:<id>.tick") -> usec in the current PERF window
+
+
+func _perf_add(key: String, dt: int) -> void:
+	_perf_listeners[key] = _perf_listeners.get(key, 0) + dt
+
+
+## The listeners / phases ("after:" tick_after callbacks, "#" runtime phases) that took the most time in the PERF
+## window, as "Name 1.2 ms" (per tick).
+func _perf_top(ticks: int) -> String:
+	var keys := _perf_listeners.keys()
+	keys.sort_custom(func(a, b): return _perf_listeners[a] > _perf_listeners[b])
+	var parts := PackedStringArray()
+	for k in keys.slice(0, 6):
+		var name: String = k if k is String else (k.get_global_name() if k is Script and k.get_global_name() != &"" 			else (k.resource_path.get_file() if k is Resource else "?"))
+		parts.append("%s %.1f ms" % [name, _perf_listeners[k] / 1000.0 / maxi(1, ticks)])
+	return ", ".join(parts)
+
+
+func _perf_frame(total: int, ph: Dictionary, now: int) -> void:
+	var pf := _perf
+	if pf["start"] == 0:
+		pf["start"] = now
+	pf["frames"] += 1
+	pf["us"] += total
+	if total > 33333:
+		pf["slow"] += 1
+	if ph.has("ticks_us"):
+		pf["tick_us"] += ph["ticks_us"]
+		pf["ticks"] += ph.get("ticks", 1)
+	if ph.has("pre_draw"):
+		pf["draw_us"] += now - ph["pre_draw"]
+	pf["worst"] = maxi(pf["worst"], total)
+	if now - pf["start"] >= PERF_SECONDS * 1000000.0:
+		var n: int = pf["frames"]
+		print("PERF last %.0f s: %.1f fps (%.1f ms per frame), %d of %d frames over 33 ms, tick %.1f ms (%d ticks), render + vsync wait %.1f ms per frame, worst frame %.0f ms" % [
+			(now - pf["start"]) / 1000000.0, n / ((now - pf["start"]) / 1000000.0), pf["us"] / 1000.0 / n, pf["slow"], n,
+			pf["tick_us"] / 1000.0 / maxi(1, pf["ticks"]), pf["ticks"], pf["draw_us"] / 1000.0 / n, pf["worst"] / 1000.0]
+			+ "; per tick: " + _perf_top(pf["ticks"]))
+		_perf = {"frames": 0, "us": 0, "slow": 0, "tick_us": 0, "ticks": 0, "draw_us": 0, "worst": 0, "start": now}
+		_perf_listeners = {}
 
 
 ## Records something worth knowing about if the current frame turns out to be a hitch (a load, a compile, ...).
@@ -554,6 +628,8 @@ func _end_frame() -> void:
 	if prev_end == 0 or ph.has("skip"):
 		return
 	var total := now - prev_end
+	if tick_count > 60:
+		_perf_frame(total, ph, now)
 	# phase durations in order; missing phases (no tick this frame) are skipped
 	var parts: Array = []
 	var last := prev_end
@@ -674,6 +750,8 @@ var tick_after: Array[Callable] = []
 ## Records the time a tick callback took under `key`: shows in --profile buckets and as the slowest listener in
 ## HITCH lines.
 func account_listener(key: String, dt: int) -> void:
+	if key.begins_with("ext:"):   # extension ticks (the game's listeners are counted per script in the tick loop)
+		_perf_listeners[key] = _perf_listeners.get(key, 0) + dt
 	if dt > _slowest_listener_us:
 		_slowest_listener_us = dt
 		_slowest_listener = key
@@ -723,24 +801,33 @@ func release_if_orphaned(o: FlashDisplayObject) -> void:
 
 ## Port of Flash's garbage collection for objects the game is done with (e.g. a killed costume element): freed
 ## DISPOSE_DELAY ticks later if still off the display list then, along with its whole subtree (and its filter /
-## mask proxy), unless its class says it is still referenced (a _can_dispose() method returning false). Mod
+## mask proxy), unless its class says it is still referenced (a _can_dispose() method returning false: it is
+## looked at again every DISPOSE_DELAY ticks until it can go, or is back on the display list). Mod
 ## ActionScript that still holds one of them sees it as null (FlashAbc), like a detached object that does
 ## nothing.
 const DISPOSE_DELAY := 60
-var _disposals: Array = []
+var _disposals: Array = []   # [object, tick], in tick order
+var _disposing: Dictionary = {}   # objects in _disposals
 
 
 func dispose_later(o: FlashDisplayObject) -> void:
+	if _disposing.has(o):
+		return
+	_disposing[o] = true
 	_disposals.append([o, tick_count + DISPOSE_DELAY])
 
 
 func _free_disposals() -> void:
 	while not _disposals.is_empty() and _disposals[0][1] <= tick_count:
 		var o = _disposals.pop_front()[0]
+		_disposing.erase(o)
 		if not is_instance_valid(o) or o._flash_parent != null or o.is_inside_tree() or o.is_queued_for_deletion():
 			continue
 		var top: CanvasItem = o._tree_node()
-		if top.get_parent() != null or (o.has_method(&"_can_dispose") and not o._can_dispose()):
+		if top.get_parent() != null:
+			continue
+		if o.has_method(&"_can_dispose") and not o._can_dispose():
+			dispose_later(o)   # still referenced: look again later
 			continue
 		if _focus != null and is_instance_valid(_focus) and (o == _focus or o.is_ancestor_of(_focus)):
 			_focus = null
@@ -844,6 +931,9 @@ func shape_material(s: FlashShape) -> Material:
 
 ## Debug / automation: when set, used as the mouse position instead of the OS cursor.
 var mouse_override = null
+## Port addition: returns true while the mouse is over Godot UI that is not part of the stage (the new menu,
+## SDTMenu); presses and moves are then not dispatched to the display list.
+var mouse_blocker := Callable()
 
 
 ## Mouse position in stage coordinates.
@@ -901,6 +991,10 @@ static func _describe_input(event: InputEvent) -> String:
 
 
 func _handle_input(event: InputEvent) -> void:
+	# Port addition: mouse presses and moves over the new menu (SDTMenu) are not the scene's; releases always pass
+	if mouse_blocker.is_valid() and (event is InputEventMouseMotion or (event is InputEventMouseButton and event.pressed)) \
+			and mouse_blocker.call():
+		return
 	if event is InputEventMouseButton:
 		var mb := event as InputEventMouseButton
 		var target := _mouse_target_at(mouse_position())
@@ -922,7 +1016,7 @@ func _handle_input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion:
 		var target := _mouse_target_at(mouse_position())
 		_dispatch_mouse(target, FlashEvent.MOUSE_MOVE)
-		_update_mouse_over()
+		_update_mouse_over(target, true)
 	elif event is InputEventKey:
 		var k := event as InputEventKey
 		if k.echo and not k.pressed:
@@ -945,6 +1039,7 @@ func _notification(what: int) -> void:
 		FlashLibrary.drain_streaming()
 	if what == NOTIFICATION_PREDELETE:
 		free_orphans_at_exit()
+		FlashSwfMod.shutdown()
 
 
 func _set_focus(o: FlashDisplayObject) -> void:
@@ -1014,10 +1109,11 @@ func _dispatch_mouse(target: FlashDisplayObject, type: String) -> void:
 	target.dispatchEvent(e)
 
 
-func _update_mouse_over() -> void:
+func _update_mouse_over(target: FlashDisplayObject = null, searched := false) -> void:
 	if stage == null or not stage.is_inside_tree():
 		return
-	var target := _mouse_target_at(mouse_position())
+	if not searched:
+		target = _mouse_target_at(mouse_position())
 	if target == _mouse_over:
 		return
 	var old := _mouse_over
@@ -1109,11 +1205,11 @@ func set_master_volume(v: float) -> void:
 # ---------------------------------------------------------------- external content
 
 ## Folder that relative content paths (mods, custom hair / backgrounds) resolve against, like a SWF's own
-## location in Flash: the executable's folder when exported, the project's parent folder in the editor.
+## location in Flash: the executable's folder on desktop, the project's parent in the editor,
+## and app-private writable user data on mobile/Web (the package/executable is not writable).
 func content_root() -> String:
-	if OS.has_feature("editor"):
-		return ProjectSettings.globalize_path("res://").get_base_dir().get_base_dir()
-	return OS.get_executable_path().get_base_dir()
+	return ContentPaths.root(OS.get_name(), OS.has_feature("editor"),
+		ProjectSettings.globalize_path("res://"), OS.get_executable_path(), OS.get_user_data_dir())
 
 
 ## Mods/ next to the game, organised by purpose. The folders only decide where file dialogs open: what a mod
@@ -1125,7 +1221,7 @@ const MOD_FOLDERS := ["Clothing", "Hair", "Backgrounds", "Characters", "Dialogue
 var mods_dir_override := ""
 
 
-## Mods/ (or one of its MOD_FOLDERS) next to the game.
+## Mods/ (or one of its MOD_FOLDERS) in the platform content root, unless explicitly overridden.
 func mods_dir(sub: String = "") -> String:
 	var d := mods_dir_override if mods_dir_override != "" else content_root().path_join("Mods")
 	return d.path_join(sub) if sub != "" else d
@@ -1168,4 +1264,3 @@ func capture_screen(stage_size: Vector2, scale: float = 1.0) -> Image:
 		out.resize(want.x, want.y, Image.INTERPOLATE_LANCZOS if want.x < out.get_width() else Image.INTERPOLATE_CUBIC)
 	out.convert(Image.FORMAT_RGBA8)
 	return out
-

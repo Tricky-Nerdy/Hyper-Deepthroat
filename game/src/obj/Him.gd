@@ -69,7 +69,7 @@ var ejaculation: Array = []
 var playingCumSound := false
 var spurting := false
 var startedSpurt := false
-var currentSpurt: Strand
+var currentSpurt   # Strand, or NativeStrand with the native fluid system (StrandControl)
 var spurtTimer: int = 0
 var spurtTimerStart: int = 0
 var spurt: int = 0

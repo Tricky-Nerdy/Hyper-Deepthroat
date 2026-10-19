@@ -17,9 +17,25 @@ var _line: Label
 var _choices: VBoxContainer
 var _next: Button
 var _picker: FileDialog
+var _debug_interval := 0.0
+var _debug_stop_file := ""
+var _debug_last_frame := 0
+var _debug_window_start := 0
+var _debug_frames := 0
+var _debug_frame_ms: Array[float] = []
+var _debug_stop_requested := false
 
 
 func _ready() -> void:
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--debug-telemetry="):
+			_debug_interval = arg.trim_prefix("--debug-telemetry=").to_float()
+			if not is_finite(_debug_interval) or _debug_interval < 0.1 or _debug_interval > 60:
+				push_error("debug telemetry interval must be between 0.1 and 60 seconds")
+				get_tree().quit(2)
+				return
+		elif arg.begins_with("--debug-stop-file="):
+			_debug_stop_file = arg.trim_prefix("--debug-stop-file=")
 	for asset in JSON.parse_string(FileAccess.get_file_as_string("res://fixtures/assets.json")):
 		commands.register_asset(asset)
 	story.load_document(JSON.parse_string(FileAccess.get_file_as_string("res://fixtures/arrival.json")))
@@ -45,7 +61,7 @@ func _ready() -> void:
 	var actions := HFlowContainer.new()
 	column.add_child(actions)
 	_button(actions, "Apply", _apply)
-	_button(actions, "Undo", func(): commands.undo(); _refresh())
+	_button(actions, "Undo", _undo)
 	_button(actions, "Save", _save)
 	_button(actions, "Load", _load_save)
 	_button(actions, "Inspect plugin.cfg", func(): _picker.popup_centered_ratio())
@@ -68,12 +84,57 @@ func _ready() -> void:
 	_picker.file_selected.connect(_inspect)
 	add_child(_picker)
 	_refresh()
+	_debug_last_frame = Time.get_ticks_usec()
+	_debug_window_start = _debug_last_frame
+	if _debug_interval > 0 or not _debug_stop_file.is_empty():
+		print("WORKBENCH_READY " + JSON.stringify({"schema": 1, "pid": OS.get_process_id(),
+			"user_data_dir": OS.get_user_data_dir(), "headless": DisplayServer.get_name() == "headless"}))
 	# Used by portable_release.py smoke: verifies scene construction without game assets.
 	if "--smoke" in OS.get_cmdline_user_args():
 		_apply()
 		await get_tree().process_frame
 		print("WORKBENCH SMOKE: ready")
 		get_tree().quit()
+
+
+func _process(_delta: float) -> void:
+	if not _debug_stop_file.is_empty() and FileAccess.file_exists(_debug_stop_file):
+		_debug_stop_requested = true
+		get_tree().quit(0)
+		return
+	if _debug_interval <= 0:
+		return
+	var now := Time.get_ticks_usec()
+	_debug_frames += 1
+	if _debug_frame_ms.size() < 4096:
+		_debug_frame_ms.append(float(now - _debug_last_frame) / 1000.0)
+	_debug_last_frame = now
+	var elapsed := float(now - _debug_window_start) / 1000000.0
+	if elapsed < _debug_interval:
+		return
+	var sorted := _debug_frame_ms.duplicate()
+	sorted.sort()
+	var total := 0.0
+	for value in sorted:
+		total += value
+	print("WORKBENCH_METRICS " + JSON.stringify({"schema": 1, "window_seconds": elapsed,
+		"frames": _debug_frames, "observed_fps": float(_debug_frames) / elapsed,
+		"engine_fps": Engine.get_frames_per_second(), "frame_gap_ms_mean": total / sorted.size(),
+		"frame_gap_ms_p95": sorted[int(ceil(sorted.size() * 0.95)) - 1], "frame_gap_ms_max": sorted.back(),
+		"frame_samples": sorted.size(), "samples_truncated": sorted.size() < _debug_frames,
+		"process_time_ms": Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0,
+		"engine_static_memory_bytes": int(Performance.get_monitor(Performance.MEMORY_STATIC)),
+		"object_count": int(Performance.get_monitor(Performance.OBJECT_COUNT)),
+		"headless": DisplayServer.get_name() == "headless"}))
+	_debug_frame_ms.clear()
+	_debug_frames = 0
+	_debug_window_start = now
+
+
+func _exit_tree() -> void:
+	if _debug_interval > 0 or not _debug_stop_file.is_empty():
+		print("WORKBENCH_STOPPED " + JSON.stringify({"schema": 1, "pid": OS.get_process_id(),
+			"stop_requested": _debug_stop_requested}))
 
 
 func _label(parent: Node, text: String, size: int) -> Label:
@@ -98,6 +159,11 @@ func _apply() -> void:
 	var proposal := commands.propose(_request.text)
 	var result: Dictionary = commands.apply(proposal.commands) if proposal.ok else proposal
 	_status.text = JSON.stringify(result)
+	_refresh()
+
+
+func _undo() -> void:
+	_status.text = "Selection undone." if commands.undo() else "Nothing to undo."
 	_refresh()
 
 
