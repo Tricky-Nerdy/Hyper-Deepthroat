@@ -4,21 +4,17 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'game/src/ext/**'
-      - 'game/src/integrations/ai/**'
-      - 'tests/test_ai_providers.py'
-      - 'tests/test_platform_workflows.py'
-      - 'game/debug/loader_integration_checks*'
+      - 'game/**'
       - 'native/**'
-      - 'tools/portable_release.py'
-      - 'tools/install_godot_ci.py'
+      - 'tests/**'
+      - 'tools/**'
       - 'workbench/**'
       - '.github/workflows/portable-loader.yml'
   pull_request:
     paths:
-      - 'game/src/ext/**'
-      - 'game/src/integrations/ai/**'
+      - 'game/**'
       - 'native/**'
+      - 'tests/**'
       - 'tools/**'
       - 'workbench/**'
       - '.github/workflows/portable-loader.yml'
@@ -47,6 +43,8 @@ jobs:
           scons -C native platform=linux target=template_debug arch=x86_64 -j2
       - name: Import project class registry
         run: godot --headless --editor --path game --import
+      - name: Run upstream game and menu regressions
+        run: bash tools/regress.sh
       - name: Verify existing-project loader integration
         run: python3 tools/portable_release.py integration
       - name: Verify and export neutral workbench

@@ -21,7 +21,8 @@ class ModShutdown(unittest.TestCase):
             work = Path(temp)
             project = work / "game"
             shutil.copytree(ROOT / "game", project, ignore=shutil.ignore_patterns(
-                ".godot", "assets", "export_presets.cfg", "export_credentials.cfg"))
+                ".godot", "assets", "bin", "export_presets.cfg", "export_credentials.cfg"))
+            # Ownership is a GDScript-only contract; exclude native descriptors and binaries.
             library = project / "assets/sdt"
             library.mkdir(parents=True)
             (library / "library.json").write_text(json.dumps({"chars": {}, "classes": {}, "root": {}}))
