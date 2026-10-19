@@ -2,7 +2,16 @@
 
 **An experimental Godot-based SDT fork by Tricky-Nerdy, developed under the Afterdark Atelier studio identity.** This is an adult-only (18+) modding and local-AI development project, **not a finished release**.
 
-> **Current status — 19 October 2026:** The game can launch on the Omarchy Linux desktop, and some standard mods load. ExtraMod and the alternate template have been reported to crash the game; compatibility is **not** verified. The proposed replacement UI based on reference screenshots is **not implemented**. Do not confuse an exported build or a passing neutral test with a fully functioning game.
+> **Status snapshot — 19 October 2026 (not a new runtime validation):** The game can launch on the Omarchy Linux desktop, and some standard mods load. ExtraMod and the alternate template have been reported to crash the game; compatibility is **not** verified. The proposed replacement UI based on reference screenshots is **not implemented**. Do not confuse an exported build or a passing neutral test with a fully functioning game.
+
+## Development priorities and handoff
+
+1. **Crash reproduction first.** Reproduce the reported ExtraMod and sby alternate-template failures with exact package versions, logs and isolated saves. Fix the underlying failure before claiming compatibility.
+2. **Replacement interface second.** Implement the agreed screenshot-referenced local-AI/modding UI, including SBY modding, Extra Mod, developer pages and AI modding. Preserve existing gameplay and provide real working controls rather than mockups.
+3. **Integrate after validation.** Once the UI launches and passes functional tests on Linux, integrate and test Android APK and web builds. Record platform-specific results and blockers; do not describe exports as working releases without launch tests.
+4. **Developer handoff to 007.** Supply reproduction steps, affected versions, validation evidence, and commit references. Do not infer completion from a successful build alone.
+
+**Scope of this README update:** Documentation only. No code, UI, build, or runtime behavior is changed by this commit.
 
 ## What makes this fork different?
 
