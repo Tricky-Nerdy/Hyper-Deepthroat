@@ -5,6 +5,9 @@ on:
   push:
     paths:
       - 'game/src/ext/**'
+      - 'game/src/integrations/ai/**'
+      - 'tests/test_ai_providers.py'
+      - 'tests/test_platform_workflows.py'
       - 'game/debug/loader_integration_checks*'
       - 'native/**'
       - 'tools/portable_release.py'
@@ -14,6 +17,7 @@ on:
   pull_request:
     paths:
       - 'game/src/ext/**'
+      - 'game/src/integrations/ai/**'
       - 'native/**'
       - 'tools/**'
       - 'workbench/**'

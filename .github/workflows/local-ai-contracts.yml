@@ -1,0 +1,32 @@
+name: Local AI desktop contracts (manual, no deployment)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install checksum-verified engine only
+        run: python tools/install_godot_ci.py --engine-only --bin-dir "${{ runner.temp }}/sdt-godot-engine"
+      - name: Neutral UI, profile, provider and loopback mock contracts
+        run: python -W error::ResourceWarning -m unittest discover -s tests -p test_ai_providers.py -v
+      - name: Build-plan and installer boundary tests
+        run: python -W error::ResourceWarning -m unittest discover -s tests -p test_platform_workflows.py -v
+      - name: Record six-target plan without exporting or installing
+        run: python tools/game_build_plan.py --output build/platform-plan
