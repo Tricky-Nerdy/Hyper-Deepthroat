@@ -782,6 +782,9 @@ func menuClicked(param1 = null):
 
 
 func toggleMenu(param1 = false, param2 = 1):
+	if SDTMenu.active():   # port addition: the new menu (SDTMenu) replaces this one unless Classic / Vanilla
+		SDTMenu.instance.toggle_tab(param2)
+		return
 	if param2 == currentTab:
 		if (menuOpen or slidingIn) and not slidingOut:
 			closeMenu()
@@ -797,6 +800,9 @@ func toggleMenu(param1 = false, param2 = 1):
 
 
 func openMenu(param1 = false):
+	if SDTMenu.active():   # port addition: see toggleMenu
+		SDTMenu.instance.open_menu()
+		return
 	g.gamePaused = true
 	slidingIn = true
 	slidingOut = false

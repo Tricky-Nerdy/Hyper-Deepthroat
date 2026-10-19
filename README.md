@@ -11,7 +11,7 @@
 3. **Integrate after validation.** Once the UI launches and passes functional tests on Linux, integrate and test Android APK and web builds. Record platform-specific results and blockers; do not describe exports as working releases without launch tests.
 4. **Developer handoff to 007.** Supply reproduction steps, affected versions, validation evidence, and commit references. Do not infer completion from a successful build alone.
 
-**Scope of this README update:** Documentation only. No code, UI, build, or runtime behavior is changed by this commit.
+**Integration status:** The upstream docked game menu and the local AI/debugging checkpoint are included in this development branch. The screenshot-referenced replacement interface and release acceptance remain pending.
 
 ## What makes this fork different?
 
@@ -56,6 +56,16 @@ python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
 These checks do not substitute for reproducing crashes with actual legacy mod packages.
+
+## Performance problems
+
+If the game runs slowly, please send `%APPDATA%\Godot\app_userdata\SDT Godot\logs\godot.log` right after
+playing (later runs replace it). Its `SYSTEM` line says which renderer and graphics card the game uses and whether
+the native extension loaded; a `PERF` line every 30 seconds gives the frame rate and where the time goes (game
+ticks or drawing); `HITCH` lines describe single slow frames.
+
+On weak or integrated graphics, Godot's lighter renderer can be faster: `run_debug.bat --rendering-method gl_compatibility`.
+
 
 ## How the game is organized
 

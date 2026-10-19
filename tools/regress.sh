@@ -57,10 +57,15 @@ ext_pid=$!
 "$GODOT" --headless --fixed-fps 30 --path game -- --save-dir="$WORK/save_da" --mods-dir="$WORK/mods_da" \
 	--driver=res://debug/da_checks.gd > "$WORK/da_checks.log" 2>&1 &
 da_pid=$!
+# New in-game menu checks (game/debug/menu_checks.gd)
+mkdir -p "$WORK/mods_menu"
+"$GODOT" --headless --fixed-fps 30 --path game -- --save-dir="$WORK/save_menu" --mods-dir="$WORK/mods_menu" 	--driver=res://debug/menu_checks.gd > "$WORK/menu_checks.log" 2>&1 &
+menu_pid=$!
 scenario_status=0
 for p in $pids; do wait "$p" || scenario_status=1; done
 wait "$ext_pid"; ext_status=$?
 wait "$da_pid"; da_status=$?
+wait "$menu_pid"; menu_status=$?
 
 fail=$scenario_status
 [ "$scenario_status" = 0 ] || echo "FAIL: a scenario process exited unsuccessfully"
@@ -109,10 +114,11 @@ script_errors() {   # each error line with the "at:" line after it
 	awk '/SCRIPT ERROR|^ERROR/ { e = $0; getline n; print e " | " n }' "$1" \
 		| grep -v -E "at exit|gdscript://|mods_ext/Plugins|missing or duplicate id|already used|contains ';'|has errors|uses class_name" | head -5
 }
-if [ -n "$(script_errors "$WORK/ext_checks.log")" ] || [ -n "$(script_errors "$WORK/da_checks.log")" ]; then
+if [ -n "$(script_errors "$WORK/ext_checks.log")" ] || [ -n "$(script_errors "$WORK/da_checks.log")" ] 		|| [ -n "$(script_errors "$WORK/menu_checks.log")" ]; then
 	echo "FAIL script errors in the checks:"
 	script_errors "$WORK/ext_checks.log"
 	script_errors "$WORK/da_checks.log"
+	script_errors "$WORK/menu_checks.log"
 	fail=1
 fi
 if [ "$ext_status" = 0 ] && grep -q "^EXT CHECKS: .* 0 failed" "$WORK/ext_checks.log"; then
@@ -127,6 +133,13 @@ if [ "$da_status" = 0 ] && grep -q "^DA CHECKS: .* 0 failed" "$WORK/da_checks.lo
 else
 	echo "FAIL DialogueActions checks, exit code $da_status (see $WORK/da_checks.log):"
 	grep -E "^CHECK FAIL|SCRIPT ERROR" -A1 "$WORK/da_checks.log" | head -16
+	fail=1
+fi
+if [ "$menu_status" = 0 ] && grep -q "^MENU CHECKS: .* 0 failed" "$WORK/menu_checks.log"; then
+	echo "ok   menu checks ($(grep -c '^CHECK ok' "$WORK/menu_checks.log") passed)"
+else
+	echo "FAIL menu checks, exit code $menu_status (see $WORK/menu_checks.log):"
+	grep -E "^CHECK FAIL|SCRIPT ERROR" -A1 "$WORK/menu_checks.log" | head -16
 	fail=1
 fi
 [ $update = 1 ] && echo "references updated in tests/golden/ (review with git diff before committing)"

@@ -43,6 +43,15 @@ static func all() -> Array:
 	return VANILLA + _registered.keys()
 
 
+## The moods a player can pick (the new menu's mood list): all(), or what the mood extension offers (moremoods hides
+## the moods its settings switch off). Set by that extension while it is on.
+static var selectable_provider := Callable()
+
+
+static func selectable() -> Array:
+	return selectable_provider.call() if selectable_provider.is_valid() else all()
+
+
 ## Called by the extension that shows an extended mood, after it has set the vanilla mood underneath.
 static func set_extended(name: String) -> void:
 	_extended = name if not name in VANILLA else ""

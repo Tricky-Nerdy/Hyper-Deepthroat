@@ -15,6 +15,8 @@ var _write: Dictionary = {}     # name -> Callable(value)
 var _listeners: Dictionary = {} # name -> [Callable(old, new)]
 var globals: Dictionary = {}    # name -> {"value", "linked"}
 var _checked: Array = []        # mod variables copied into the local store for a line's check
+var owner := ""                 # extension registering right now (DialogueActions.run_addon)
+var _owned: Dictionary = {}     # extension id -> [["read" | "write", name] | ["listener", name, Callable]]
 
 
 func store() -> Dictionary:
@@ -30,11 +32,34 @@ func dlog(msg: String) -> void:
 func register_read(name: String, getter: Callable) -> void:
 	if not _read.has(name):
 		_read[name] = getter
+		_own(["read", name])
 
 
 func register_write(name: String, setter: Callable) -> void:
 	if not _write.has(name):
 		_write[name] = setter
+		_own(["write", name])
+
+
+func _own(entry: Array) -> void:
+	if owner != "":
+		if not _owned.has(owner):
+			_owned[owner] = []
+		_owned[owner].append(entry)
+
+
+## Removes the mod variables and listeners extension `ext_id` registered.
+func remove_owner(ext_id: String) -> void:
+	for e in _owned.get(ext_id, []):
+		match e[0]:
+			"read":
+				_read.erase(e[1])
+			"write":
+				_write.erase(e[1])
+			"listener":
+				if _listeners.has(e[1]):
+					_listeners[e[1]].erase(e[2])
+	_owned.erase(ext_id)
 
 
 func register(name: String, getter: Callable, setter: Callable) -> void:
@@ -49,6 +74,7 @@ func add_listener(name: String, fn: Callable) -> void:
 	if not _listeners.has(name):
 		_listeners[name] = []
 	_listeners[name].append(fn)
+	_own(["listener", name, fn])
 
 
 ## A mod variable's value, or null if `name` has no read handler.

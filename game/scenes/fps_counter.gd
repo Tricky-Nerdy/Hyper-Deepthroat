@@ -1,8 +1,11 @@
 extends CanvasLayer
 ## Frames-per-second overlay (not part of the original game). F3 toggles it.
 
+const INTERVAL_US := 250000   # the frame rate over the last quarter second (Godot's own value changes once a second)
+
 var _label := Label.new()
-var _timer := 0.0
+var _start := 0
+var _frames := 0
 
 
 func _ready() -> void:
@@ -14,18 +17,17 @@ func _ready() -> void:
 	_label.add_theme_constant_override("outline_size", 4)
 	_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_label)
-	_update()
-
-
-func _process(delta: float) -> void:
-	_timer += delta
-	if _timer >= 0.25:
-		_timer = 0.0
-		_update()
-
-
-func _update() -> void:
 	_label.text = "%d fps" % Engine.get_frames_per_second()
+	_start = Time.get_ticks_usec()
+
+
+func _process(_delta: float) -> void:
+	_frames += 1
+	var now := Time.get_ticks_usec()
+	if now - _start >= INTERVAL_US:
+		_label.text = "%d fps" % roundi(_frames * 1000000.0 / (now - _start))
+		_frames = 0
+		_start = now
 
 
 func _unhandled_key_input(event: InputEvent) -> void:

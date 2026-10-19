@@ -234,6 +234,7 @@ func initGame() -> void:
 	openMainMenu()
 	g.her.initialise()
 	Extensions.start()   # port extension: built-in extensions and plugins (src/ext), once the game is built
+	SDTMenu.start()   # port addition: the new in-game menu (src/menu); the classic one in Vanilla mode
 
 
 func startGame() -> void:

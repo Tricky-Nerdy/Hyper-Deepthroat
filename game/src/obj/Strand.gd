@@ -536,4 +536,17 @@ func killMe() -> void:
 		removeEventListener(FlashEvent.ENTER_FRAME, tick)
 		if parent:
 			parent.removeChild(self)
-		queue_free()
+		Flash.dispose_later(self)   # port: freed once nothing holds it any more (_can_dispose)
+
+
+## Flash.dispose_later policy: in Flash a killed strand lives on while the game still holds it, and the game keeps
+## calling it (her drool and nostril spray, his current spurt: insertLink / detachSourceLink on a dead strand are
+## harmless there). Freeing it any earlier made those calls crash.
+func _can_dispose() -> bool:
+	var her = g.her
+	if her != null and (her.currentCumDrool == self or her.currentSpitDrool == self or her.currentNostrilSpray == self):
+		return false
+	if g.him != null and g.him.currentSpurt == self:
+		return false
+	var sc = g.strandControl
+	return not (sc.strands.has(self) or sc.cumStrands.has(self))

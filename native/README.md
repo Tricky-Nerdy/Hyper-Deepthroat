@@ -8,7 +8,13 @@ forces the GDScript paths (for A/B tests), `--checknative` cross-checks native h
 Currently native:
 - `SDTNative.build_strand` - Strand.renderStrand / generateInterpolationPoints as one vertex-coloured mesh (gradient
   stops reproduced exactly by splitting triangles at the stop lines).
-- `SDTNative.hit_shape` - shape-flag hit testing (FlashSprite / FlashShape `_hit_shape`) over the display tree.
+- `SDTNative.hit_shape` - shape-flag hit testing (FlashSprite / FlashShape `_hit_shape`) over the display tree;
+  `hit_flat` tests against a tree flattened once per tick (many tests of the same body part).
+- `SDTFluids` (fluids.cpp) - the spit / cum strands simulated as plain data and drawn as one mesh per strand layer
+  (used by StrandControl, with NativeStrand handles for the game).
+- `SDTSweat` (sweat.cpp) - the sweat droplets, drawn by one SweatBatch node per body part (used by Sweat.gd).
+
+Objects are built per target in `build/template_debug` and `build/template_release`.
 - `SWFFile` - runtime SWF reading and rasterization for mod conversion. This is a required capability for
   runtime conversion, not an optional acceleration of a complete GDScript converter.
 

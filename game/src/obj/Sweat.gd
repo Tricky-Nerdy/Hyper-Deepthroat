@@ -76,11 +76,127 @@ func _init(container: FlashSprite = null, p: Vector2 = Vector2.ZERO, spread: Vec
 		queue_free()
 
 
+## Port: a droplet's shape tests ask whether a point is on the body part's skin; many droplets ask the same body part
+## every tick, so they use the native test against the part flattened once per tick (SDTNative.hit_flat), which
+## leaves droplets out (the original left out only the testing droplet).
+static var _flat: bool = FlashDisplayObject.native and ClassDB.class_has_method(&"SDTNative", &"hit_flat")
+
+
+static func _hit(o: FlashDisplayObject, px: float, py: float) -> bool:
+	if _flat:
+		var lp := o.flash_global_transform().affine_inverse() * Vector2(px, py)
+		return ClassDB.class_call_static(&"SDTNative", &"hit_flat", o, lp, Flash.tick_count)
+	return o.hitTestPoint(px, py, true)
+
+
 static func clearDroplets() -> void:
+	if _sys != null:
+		_sys.clear()
+		for b in _batches.values():
+			b.set_drops(PackedFloat32Array())
 	for group in sweatGroups.values():
 		for s in group.duplicate():
 			s.kill()
 	sweatGroups = {}
+
+
+# ---------------------------------------------------------------- native droplets
+
+## Port: with the native extension the droplets are simulated by SDTSweat (native/src/sweat.cpp) as plain data and
+## drawn by one SweatBatch per body part, instead of a display object, a listener and a screen copy per droplet.
+## The game creates droplets with spawn(); without the extension it makes Sweat objects as in the original.
+static var native_enabled: bool = ClassDB.class_exists(&"SDTSweat") and not "--nonative" in OS.get_cmdline_user_args()
+static var _sys = null                 # SDTSweat
+static var _cont: Dictionary = {}      # display object -> container index
+static var _cont_objs: Array = []
+static var _batches: Dictionary = {}   # container index -> SweatBatch
+
+
+## A new droplet on `container` near p (its space), spread at random, that may land on `others` when it falls
+## (Sweat.new in the original).
+static func spawn(container: FlashSprite, p: Vector2, spread: Vector2, others: Array) -> void:
+	if not native_enabled:
+		Sweat.new(container, p, spread, others)
+		return
+	if not g.sweat:
+		return
+	if _sys == null:
+		_sys = ClassDB.instantiate(&"SDTSweat")
+		Flash.tick_after.append(_native_tick)   # after all of the tick's game logic (her movement)
+	var parent := _index(container, true)
+	var o := PackedInt32Array()
+	for c in others:
+		o.append(_index(c, true))
+	_push()
+	_sys.spawn(parent, p, spread, o, MAX_DROPLETS)
+
+
+static func droplet_count() -> int:
+	return _sys.count() if _sys != null else currentDroplets
+
+
+## Index of a body part; with_children: (re)sends its sprite children (the parts a droplet can slide onto).
+static func _index(o: FlashDisplayObject, with_children := false) -> int:
+	var i: int
+	if _cont.has(o):
+		i = _cont[o]
+	else:
+		i = _sys.add_container(o)
+		_cont[o] = i
+		_cont_objs.append(o)
+	if with_children and o is FlashSprite:
+		var kids := PackedInt32Array()
+		for c in o._children:
+			if c is FlashSprite and not (c is Sweat) and not (c is SweatBatch):
+				kids.append(_index(c))
+		var p: FlashDisplayObject = o._flash_parent
+		_sys.set_children(i, kids, p.get_instance_id() if p != null else 0, p.getChildIndex(o) if p != null else 0)
+	return i
+
+
+## Stage transforms and summed rotations of the body parts.
+static func _push() -> void:
+	var xf: Array = []
+	var rot := PackedFloat32Array()
+	var own := PackedFloat32Array()
+	xf.resize(_cont_objs.size())
+	rot.resize(_cont_objs.size())
+	own.resize(_cont_objs.size())
+	for i in _cont_objs.size():
+		var o = _cont_objs[i]
+		if not is_instance_valid(o):
+			xf[i] = Transform2D()
+			continue
+		xf[i] = o.flash_global_transform()
+		own[i] = o.rotation_degrees
+		var r := 0.0
+		var a: FlashDisplayObject = o
+		while a != null and a != Flash.stage:
+			r += a.rotation_degrees
+			a = a._flash_parent
+		rot[i] = r
+	_sys.set_transforms(xf, rot, own)
+
+
+static func _native_tick() -> void:
+	if g.gamePaused:
+		return
+	_push()
+	_sys.tick(Flash.tick_count)
+	var used := {}
+	for c in _sys.parents_in_use():
+		used[c] = true
+		var b: SweatBatch = _batches.get(c)
+		var part = _cont_objs[c]
+		if b == null:
+			b = SweatBatch.new()
+			_batches[c] = b
+		if is_instance_valid(part) and (b._flash_parent != part or part._children.back() != b):
+			part.addChild(b)   # on top of the part, as the droplets re-added themselves
+		b.set_drops(_sys.get_draw(c))
+	for c in _batches:
+		if not used.has(c):
+			_batches[c].set_drops(PackedFloat32Array())
 
 
 static func staticTick() -> void:
@@ -126,7 +242,7 @@ func jumpToChild() -> void:
 	var ahead: Vector2 = onChild.localToGlobal(localPoint + speed)
 	for c in parentChildren:
 		if c.hitTestPoint(globalPoint.x, globalPoint.y, false):
-			if c.hitTestPoint(globalPoint.x, globalPoint.y, true):
+			if _hit(c, globalPoint.x, globalPoint.y):
 				onChild = c
 				ahead = onChild.globalToLocal(ahead)
 				localPoint = onChild.globalToLocal(globalPoint)
@@ -180,44 +296,51 @@ func tick() -> void:
 			parentDown[onChild] = 180.0
 		else:
 			parentDown[onChild] = parentDown[sweatParent] - onChild.rotation_degrees
-	for s in sweatGroups[sweatParent].duplicate():
-		if s != self and is_instance_valid(s):
+	# Port: droplets that cannot be near even at full mass are skipped up front (the same result as testing every
+	# droplet with isNear, which cost most of the tick with many droplets).
+	var near: Array = []
+	var p := position
+	var r := nearDist * maxf(mass, maxMass)
+	for s in sweatGroups[sweatParent]:
+		if s != self:
+			var q: Vector2 = s.position
+			if q.x >= p.x - r and q.x <= p.x + r and q.y >= p.y - r and q.y <= p.y + r:
+				near.append(s)
+	for s in near:
+		if is_instance_valid(s):
 			if isNear(s):
 				if s.currentMass > mass:
 					s.absorb(self)
 					return
 				absorb(s)
-	rotation_degrees = parentDown[sweatParent] + 180.0
+	# Port: rotation, position and scale are each set once per tick (every transform change walks up the display
+	# list to invalidate cached bounds, and the original set them field by field, up to 7 times per tick).
+	var rot_deg: float = parentDown[sweatParent] + 180.0
 	var ang: float = parentDown[onChild] * PI / 180.0
 	gVec = Vector2(sin(ang), -cos(ang))
 	localPoint += speed
 	speed *= friction
 	globalPoint = onChild.localToGlobal(localPoint)
-	if notOnParent:
-		var lp: Vector2 = sweatParent.globalToLocal(globalPoint)
-		x = lp.x
-		y = lp.y
-	else:
-		x = localPoint.x
-		y = localPoint.y
-	if globalPoint.y > 1000:
+	var newpos: Vector2 = sweatParent.globalToLocal(globalPoint) if notOnParent else localPoint
+	transform = Transform2D(deg_to_rad(rot_deg), scale, skew, newpos)
+	if globalPoint.y > 1000 or is_nan(globalPoint.x) or is_nan(globalPoint.y):   # port: NaN as a last resort
 		kill()
 		return
 	lastVelocity = velocity
 	velocity = sqrt(speed.x * speed.x + speed.y * speed.y)
-	sVec = Vector2(speed.x / velocity, speed.y / velocity)
-	# The droplet leaves its parent while testing the parent's shape, then rejoins on top.
-	if parent:
-		parent.removeChild(self)
+	# Port fix: a droplet at rest has no direction (the original divided by 0 here; the NaN then spread to its
+	# speed and position, and the probe loop below never ended, freezing the game).
+	sVec = Vector2(speed.x / velocity, speed.y / velocity) if velocity > 0 else Vector2.ZERO
+	# The droplet leaves its parent while testing the parent's shape, then rejoins on top. Port: instead of taking
+	# it off the display list (slow here), the shape tests skip it, and it only moves when something is above it.
+	FlashDisplayObject.hit_exclude = self
 	if attached:
-		scaleY = 1.0 + maxf(-0.3, minf(0.3, (velocity - lastVelocity) * 0.5))
-		scaleX = 1.0 / scaleY
-		scaleY *= mass
-		scaleX *= mass
+		var sy := 1.0 + maxf(-0.3, minf(0.3, (velocity - lastVelocity) * 0.5))
+		scale = Vector2(1.0 / sy * mass, sy * mass)
 		alpha = mass + 0.5
 		mass = minf(maxMass, mass + randf() * 0.01)
 		speed += attachedGravity * gVec * maxf(0.0, mass - 0.5)
-		if sweatParent.hitTestPoint(globalPoint.x, globalPoint.y, true):
+		if _hit(sweatParent, globalPoint.x, globalPoint.y):
 			leftPush *= 0.8
 			rightPush *= 0.8
 			if predictToggle < 1:
@@ -226,16 +349,16 @@ func tick() -> void:
 				predictToggle = 0
 				var gp := globalPoint
 				var pd := predictDist
-				if not sweatParent.hitTestPoint(gp.x - sVec.y * pd * 2, gp.y + sVec.x * pd * 2, true):
+				if not _hit(sweatParent, gp.x - sVec.y * pd * 2, gp.y + sVec.x * pd * 2):
 					rightPush = minf(velocity * 0.4, leftPush + 0.08)
-				if not sweatParent.hitTestPoint(gp.x + sVec.y * pd * 2, gp.y - sVec.x * pd * 2, true):
+				if not _hit(sweatParent, gp.x + sVec.y * pd * 2, gp.y - sVec.x * pd * 2):
 					leftPush = minf(velocity * 0.4, rightPush + 0.08)
-				if not sweatParent.hitTestPoint(gp.x + sVec.x * 8 * pd - sVec.y * pd, gp.y + sVec.y * 8 * pd + sVec.x * pd, true):
+				if not _hit(sweatParent, gp.x + sVec.x * 8 * pd - sVec.y * pd, gp.y + sVec.y * 8 * pd + sVec.x * pd):
 					leftPush = minf(velocity * 0.2, leftPush + 0.08)
-				if not sweatParent.hitTestPoint(gp.x + sVec.x * 8 * pd + sVec.y * pd, gp.y + sVec.y * 8 * pd - sVec.x * pd, true):
+				if not _hit(sweatParent, gp.x + sVec.x * 8 * pd + sVec.y * pd, gp.y + sVec.y * 8 * pd - sVec.x * pd):
 					rightPush = minf(velocity * 0.2, rightPush + 0.08)
 				if notOnParent:
-					if not onChild.hitTestPoint(gp.x, gp.y, true):
+					if not _hit(onChild, gp.x, gp.y):
 						jumpToChild()
 				else:
 					jumpToChild()
@@ -254,11 +377,12 @@ func tick() -> void:
 					notOnParent = true
 					justDetached = true
 				else:
-					if sweatParent.hitTestPoint(globalPoint.x + gVec.y * probe, globalPoint.y + gVec.x * probe, true):
+					if _hit(sweatParent, globalPoint.x + gVec.y * probe, globalPoint.y + gVec.x * probe):
 						speed.x += gVec.y * probe * 0.8
 						speed.y += gVec.x * probe * 0.8
 						var l := sqrt(speed.x * speed.x + speed.y * speed.y)
-						speed *= velocity / l
+						if l > 0:   # port fix: see sVec above
+							speed *= velocity / l
 						break
 					if probe > 0:
 						probe = -probe
@@ -266,12 +390,12 @@ func tick() -> void:
 						probe = -probe + 1.0
 	else:
 		speed += freeGravity * gVec
-		if sweatParent.hitTestPoint(globalPoint.x, globalPoint.y, true):
+		if _hit(sweatParent, globalPoint.x, globalPoint.y):
 			attached = true
 			speed *= 0.4
 		else:
 			for c in parentsToCheck.duplicate():
-				if c.hitTestPoint(globalPoint.x, globalPoint.y, true):
+				if _hit(c, globalPoint.x, globalPoint.y):
 					if not justDetached:
 						var ahead: Vector2 = onChild.localToGlobal(localPoint + speed)
 						ahead = c.globalToLocal(ahead)
@@ -287,4 +411,18 @@ func tick() -> void:
 					if sweatParent.parent == c.parent and sweatParent.parent.getChildIndex(sweatParent) < sweatParent.parent.getChildIndex(c):
 						parentsToCheck.erase(c)
 		justDetached = false
-	sweatParent.addChild(self)
+	FlashDisplayObject.hit_exclude = null
+	if parent != sweatParent or not _on_top():
+		sweatParent.addChild(self)
+
+
+## True if only other droplets are above this one in its parent (re-adding it would only reorder droplets).
+func _on_top() -> bool:
+	var kids: Array = sweatParent._children
+	for i in range(kids.size() - 1, -1, -1):
+		var c = kids[i]
+		if c == self:
+			return true
+		if not c is Sweat:
+			return false
+	return false

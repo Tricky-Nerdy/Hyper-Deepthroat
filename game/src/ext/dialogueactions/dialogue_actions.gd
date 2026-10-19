@@ -9,6 +9,8 @@ extends SDTExtension
 ##   vars.add_listener(name, fn)              fn(old, new) after a local variable was written
 ##   add_line_change_listener(fn)             fn() once, when the next line starts
 ##   run_code("[TRIGGER_a][OTHER]")           runs triggers from code
+## An extension registers these inside SDTExtension.on_dialogueactions(setup) (or run_addon), so they come back
+## when DialogueActions is switched on again and go away when that extension is disabled.
 
 const VarsScript := preload("res://src/ext/dialogueactions/da_variables.gd")
 const VarTriggers := preload("res://src/ext/dialogueactions/da_var_triggers.gd")
@@ -26,6 +28,8 @@ var vars = null
 var game = null   # da_game_triggers.gd
 var world = null  # da_world_triggers.gd
 var _triggers: Dictionary = {}   # name -> {arg_count: Callable}
+var _owned: Dictionary = {}      # extension id -> [[name, arg_count]]: triggers other extensions registered
+var _owner := ""                 # extension whose additions are being registered (run_addon)
 var _line_listeners: Array = []
 var _current_line := ""          # line type being chosen by sayRandomPhrase
 var _start_pending := false
@@ -62,6 +66,10 @@ func _enable() -> void:
 	hook_after(&"Dialogue.loadCustomDialogue", func(_c): _setup_line_types())
 	on_late_tick(_tick)
 	_setup_line_types()
+	_owned.clear()
+	for a in Extensions.da_addons():
+		if a[0] != self:
+			run_addon(a[0].id, a[1])
 
 
 func _disable() -> void:
@@ -76,6 +84,28 @@ func _disable() -> void:
 
 # ---------------------------------------------------------------- triggers
 
+## Runs `setup(self)` with what it registers recorded as `owner`'s (removed again by remove_owner).
+func run_addon(owner: String, setup: Callable) -> void:
+	var before := _owner
+	_owner = owner
+	vars.owner = owner
+	setup.call(self)
+	_owner = before
+	vars.owner = before
+
+
+## Removes the triggers, variables and listeners extension `owner` added.
+func remove_owner(owner: String) -> void:
+	for t in _owned.get(owner, []):
+		if _triggers.has(t[0]):
+			_triggers[t[0]].erase(t[1])
+			if _triggers[t[0]].is_empty():
+				_triggers.erase(t[0])
+	_owned.erase(owner)
+	if vars != null:
+		vars.remove_owner(owner)
+
+
 func register_trigger(name: String, arg_count: int, fn: Callable) -> void:
 	if not _triggers.has(name):
 		_triggers[name] = {}
@@ -83,6 +113,10 @@ func register_trigger(name: String, arg_count: int, fn: Callable) -> void:
 		push_error("DialogueActions: trigger [%s] with %d arguments registered twice" % [name, arg_count])
 		return
 	_triggers[name][arg_count] = fn
+	if _owner != "":
+		if not _owned.has(_owner):
+			_owned[_owner] = []
+		_owned[_owner].append([name, arg_count])
 
 
 func has_trigger(name: String, arg_count: int) -> bool:

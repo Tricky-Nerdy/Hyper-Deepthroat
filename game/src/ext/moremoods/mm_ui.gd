@@ -1,7 +1,8 @@
 extends RefCounted
 ## moremoods' menu controls, where the Loader mod put them: the eye roll button (Scene menu, "u"), the upper
 ## eyelid limit button and slider (Custom menu), the bite button and slider (Options menu) and the mood list that
-## opens from the mood label.
+## opens from the mood label. The new menu's controls for the same modes (Her > Face, Behaviour > Biting) are
+## declared in add_menu_controls and use the same setters.
 
 const OFF := 0xFFFFFF
 const GREEN := 0x00FF00
@@ -43,6 +44,7 @@ func build() -> void:
 		mm.hook_after(&"InGameMenu.updateTabs", func(_c): close_list())
 		mm.hook_after(&"InGameMenu.closeMenu", func(_c): close_list())
 		g.inGameMenu.addEventListener(FlashEvent.CLICK, _menu_clicked)
+	add_menu_controls()
 	refresh()
 
 
@@ -68,8 +70,12 @@ func refresh() -> void:
 
 
 func _eyeroll_clicked() -> void:
+	set_eyeroll((mm.face.eyeroll_mode + 1) % 3)
+
+
+func set_eyeroll(mode: int) -> void:
 	var face = mm.face
-	face.eyeroll_mode = (face.eyeroll_mode + 1) % 3
+	face.eyeroll_mode = mode
 	if not face.eyeroll_enabled():
 		g.her.lookAt(g.her.eyesDown)
 	var her = g.her
@@ -79,13 +85,55 @@ func _eyeroll_clicked() -> void:
 
 
 func _eyelid_clicked() -> void:
-	mm.face.eyelid_mode = (mm.face.eyelid_mode + 1) % 4
+	set_eyelid((mm.face.eyelid_mode + 1) % 4)
+
+
+func set_eyelid(mode: int) -> void:
+	mm.face.eyelid_mode = mode
+	g.her.updateEyes()
 	refresh()
 
 
 func _bite_clicked() -> void:
-	mm.behaviour.bite_mode = (mm.behaviour.bite_mode + 1) % 3
+	set_bite((mm.behaviour.bite_mode + 1) % 3)
+
+
+func set_bite(mode: int) -> void:
+	mm.behaviour.bite_mode = mode
 	refresh()
+
+
+const EYEROLL := ["Off", "Roll", "Roll + cross-eyed"]
+const EYELID := ["Normal", "Auto", "Limit", "Both"]
+const BITE := ["Off", "By mood", "By slider"]
+
+
+## Port addition: the new menu's controls (SDTMenu) for the eye roll, upper eyelid and biting modes.
+func add_menu_controls() -> void:
+	var face = mm.face
+	var beh = mm.behaviour
+	mm.menu_control("her", "Face", MenuSchema.choice("Eye roll",
+		"Her eyes roll back as she nears passing out. Roll + cross-eyed: she also goes cross-eyed when she passes out.",
+		EYEROLL, func(): return EYEROLL[clampi(face.eyeroll_mode, 0, 2)], func(v: String): set_eyeroll(EYEROLL.find(v)),
+		{"keywords": "eyeroll eyes moremoods", "wide": true}))
+	mm.menu_control("her", "Face", MenuSchema.choice("Upper eyelids",
+		"Normal: the mood decides. Auto: they lower with where she looks. Limit: they stay at least as closed as the slider below. Both: auto and limit.",
+		EYELID, func(): return EYELID[clampi(face.eyelid_mode, 0, 3)], func(v: String): set_eyelid(EYELID.find(v)),
+		{"keywords": "eyelid lids moremoods", "wide": true}))
+	mm.menu_control("her", "Face", {"type": "slider", "label": "Eyelid limit",
+		"tip": "How closed her upper eyelids stay at least (Upper eyelids: Limit or Both).",
+		"get": func(): return face.eyelid_slider,
+		"set": func(v: float): face.eyelid_slider = v; g.her.updateEyes(); refresh(),
+		"visible": func(): return face.eyelid_mode >= 2, "keywords": "eyelid lids moremoods"})
+	mm.menu_control("behaviour", "Biting", MenuSchema.choice("Biting",
+		"By mood: she bites when angry, upset, disgusted, aggressive or teasing, more as she runs out of breath. By slider: in any mood, as much as the slider below.",
+		BITE, func(): return BITE[clampi(beh.bite_mode, 0, 2)], func(v: String): set_bite(BITE.find(v)),
+		{"keywords": "bite moremoods", "wide": true}))
+	mm.menu_control("behaviour", "Biting", {"type": "slider", "label": "Bite chance",
+		"tip": "Low: she bites when close to passing out; higher: also when out of breath; highest: also when he is deep.",
+		"get": func(): return beh.bite_slider,
+		"set": func(v: float): beh.bite_slider = v; refresh(),
+		"visible": func(): return beh.bite_mode == 2, "keywords": "bite moremoods"})
 
 
 func open_list() -> void:

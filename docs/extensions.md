@@ -10,9 +10,12 @@ The game code in `game/src` is a 1:1 port of the original ActionScript. Features
 Both use the same API (`SDTExtension`). One switch, **Vanilla mode** (`--vanilla` on the command line), turns every
 extension off and gives the original game.
 
-Status: hooks, the extension base class, tick callbacks, events, settings, character code fields, menu buttons,
-hotkeys and plugin loading exist. Still to come: dialogue extension points, more menu widgets and the generated
-options screen (with the list of plugins to switch on and off).
+Status: hooks, the extension base class, tick callbacks, events, settings, character code fields, classic menu
+buttons, controls in the new menu (with generated settings pages and the list of extensions), hotkeys, dialogue
+triggers / variables and plugin loading exist.
+
+Built in: DialogueActions (`dialogueactions`), moremoods (`moremoods`) and MoreTriggers (`moretriggers`), each a
+reimplementation of the Loader mod of that name, written from its documentation and behaviour.
 
 ## Writing an extension
 
@@ -51,6 +54,8 @@ func _passed_out(call: Hooks.Call) -> void:
 | `on_event(name, fn)` | `fn(...)` when something happens; events are listed in `Extensions.EVENTS` (`mods_loaded`, `mood_changed`). |
 | `mood()` | Her current mood, including extended moods (see Moods). |
 | `charcode_field(key, get, set, reset, after_mods)` | A field in the character code, see below. |
+| `on_dialogueactions(setup)` | Dialogue triggers and variables, see [Dialogue triggers](#dialogue-triggers). |
+| `menu_control(section, group, spec)` | A control in the new in-game menu: `section` is `"her"`, `"clothes"`, `"him"`, `"scene"`, `"behaviour"`, `"effects"`, `"dialogue"`, `"mods"` or `"settings"`; `group` an existing group of it (e.g. `"Face"`) or a new one. `spec` is a control spec (`MenuWidgets`: `type` toggle / choice / slider / actions / ..., `label`, `tip`, `get` / `set`, optional `visible()` / `enabled()`, `wide`); `MenuSchema.choice(...)` and friends build them. Tagged with the extension's name in the menu; removed when the extension is disabled. Settings declared with `setting()` get a page of their own automatically. |
 | `menu_button(menu, x, y, text, on_click)` | A small button in a game menu (`"optionsMenu"`, `"sceneMenu"`, ...), styled like the Loader's mod buttons; `set_color(0x00FF00)` shows a state. |
 | `menu_slider(menu, x, y, w, h, value, on_change)` | A slider (ExtSlider, value 0..1) in a game menu. |
 | `menu_label(menu, x, y, w, text)` | A text label in a game menu. |
@@ -104,6 +109,24 @@ charcode_field("tongueLength",
 - `after_mods = true` applies the field once the code's .swf mods have loaded (for values that refer to mod items).
 - Fields nobody knows, from a disabled extension or a Loader mod the port does not have, are kept with the
   character and written back out, so saving never loses them.
+
+## Dialogue triggers
+
+Triggers (`[NAME_arg1_arg2]` in dialogue lines) and variables (`*name*`, `"set"`, `"check"`) come from the built-in
+DialogueActions. Extensions add their own inside `on_dialogueactions`:
+
+```gdscript
+func _enable() -> void:
+	on_dialogueactions(func(da):
+		da.register_trigger("WAVE", 1, func(args): print("wave ", args[0]))   # [WAVE_3]; -1 = any number of args
+		da.vars.register("example.power", func(): return 5, func(v): print("set to ", v))
+		da.vars.add_listener("myVar", func(old, new): print(old, " -> ", new)))
+```
+
+`setup(da)` runs when DialogueActions is on, and again whenever it is switched back on; everything it registered
+is removed when the extension is disabled. Arguments are split at `_`, so variable names used as arguments cannot
+contain `_`. Something registered later (e.g. from inside a trigger) goes in `da.run_addon(id, func(d): ...)` so
+it is removed with the extension too.
 
 ## Moods
 
