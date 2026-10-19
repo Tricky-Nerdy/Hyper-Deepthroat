@@ -1,100 +1,74 @@
-# SDT-Godot
+# Hyper-Deepthroat
 
-A port of the Flash game *SDT* to the Godot engine (4.7). It aims to stay faithful to the original while being
-easier to extend (mods, new features) and running much faster than the Flash version.
+**An experimental Godot-based SDT fork by Tricky-Nerdy, developed under the Afterdark Atelier studio identity.** This is an adult-only (18+) modding and local-AI development project, **not a finished release**.
 
-**Adult content (18+).** The game is sexually explicit.
+> **Current status — 19 October 2026:** The game can launch on the Omarchy Linux desktop, and some standard mods load. ExtraMod and the alternate template have been reported to crash the game; compatibility is **not** verified. The proposed replacement UI based on reference screenshots is **not implemented**. Do not confuse an exported build or a passing neutral test with a fully functioning game.
 
-The game's art, sounds and fonts are included, already converted from the original `SDT.swf` into
-`game/assets/sdt/`, so the original game is not needed to play. Art and sounds from community mods whose features
-the port reimplements are included in `game/assets/mods/` (for example DialogueActions' voice clips). They belong
-to their authors (the original game's author, and the mods' authors) and are not covered by this repository's
-license. If you are a rights holder and want something removed, please open an issue.
+## What makes this fork different?
 
-## Loader maintenance fork
+This fork builds on [SDT-Godot](https://github.com/asdkfkosafj/SDT-Godot), a port of the original Flash SDT game to Godot 4.7. It retains the base game, Flash compatibility layer, converted assets and mod-loading pathways while developing:
 
-This branch extends the existing Godot loader with validated plugin manifests, dependency diagnostics,
-dependency-aware enable/disable, managed replacement restoration and runtime capability reports.
-See [the compatibility contract](docs/loader-compatibility.md) for implemented behavior and unverified legacy
-targets. Broad TemplateExtension/ExtraMod parity and pixel-perfect rendering are not established.
+- **Loader modernization:** plugin manifests, dependency and version diagnostics, enable/disable lifecycle, owned replacement restoration, and capability reports. See [loader compatibility](docs/loader-compatibility.md).
+- **Local AI integration work:** text/image provider configuration, optional worker connections, and locally scoped connection flows. These are **development features**, not a promise that any particular model, endpoint or image workflow is operational. See [local AI providers](docs/local-ai-providers.md) and [AI development status](docs/independent-ai-progress-2026-10-19.md) where present in the checked-out branch.
+- **Developer tooling:** isolated neutral workbench for deterministic asset commands, branching dialogue and save/load tests; regression scripts, diagnostics, portable staging and build verification. See [portable workbench](docs/portable-workbench.md).
+- **UI redesign goal:** replace the native interface with the agreed screenshot-based modding/developer UI while preserving vanilla behavior. **Not yet delivered.**
+- **Sby compatibility goal:** verify the specific sby alternate template, TemplateExtension and ExtraMod versions, then implement adapters and regression fixtures. **Not yet delivered.**
 
-A [portable neutral workbench](docs/portable-workbench.md) exercises the shared loader core, exact-name asset
-commands and branching dialogue without exporting third-party game assets. Run
-`python3 tools/portable_release.py verify` from the repository root. Cross-platform export attempts produce
-machine-readable results and logs, including failed targets.
-See [release results](docs/release-results.md) for measured checks and deployment blockers.
+## What works, what does not
 
-## Layout
+| Area | Current evidence |
+| --- | --- |
+| Vanilla Godot game | Desktop launch observed; complete gameplay certification pending |
+| Standard mods | Some load; universal behavior compatibility **not established** |
+| ExtraMod and template | User-reported crashes; priority blockers |
+| Native loader lifecycle | Neutral fixtures and integration checks reported passing in [release results](docs/release-results.md); not proof of full legacy mod compatibility |
+| Local AI | Integration code and provider documentation under development; runtime/provider-specific behavior requires testing |
+| Screenshot-based replacement UI | Pending |
+| Linux / Windows / Web | See target-specific evidence in [release results](docs/release-results.md); exports are not all verified |
+| Android | Preview work in progress; no certified playable release |
 
-- `game/`: the Godot project.
-  - `game/flash/`: a small Flash runtime (display list, timelines, filters, text, SharedObject; an ActionScript
-    interpreter for mod scripts).
-  - `game/src/`: the game, ported class by class from the original ActionScript (same class and method names).
-  - `game/scenes/main.gd`: entry point, plus the scripted test harness options.
-- `native/`: source of the C++ GDExtension for hot paths (see [native/README.md](native/README.md)).
-- `game/assets/sdt/`: the converted game assets (shapes, sounds, fonts, timelines in `library.json`).
-- `game/assets/mods/`: art and sounds from community mods whose features the port reimplements.
-- `game/bin/`: the native extension, prebuilt for Windows (debug and release DLLs).
-- `tools/swfconv/`: converts `SDT.swf` into the asset library (only needed to regenerate `game/assets/sdt/`).
-- `tools/porting/`: one-off scripts used while porting the ActionScript (kept for reference).
-- `Mods/`: created on first run in the repository root (next to `run_debug.bat`; next to the executable in an
-  exported build), with `Clothing`, `Hair`, `Backgrounds`, `Characters`, `Dialogue` and `Plugins` folders.
-  Vanilla SDT `.swf` mods placed there show up in the in-game pickers.
+## Getting started (developers)
 
-## Running
+Requirements: **Godot 4.7.2 standard edition** and Python 3 for supporting scripts. Clone with submodules where native builds are needed:
 
-1. Install [Godot 4.7.2](https://godotengine.org/download/archive/4.7.2-stable/) (the standard version, not .NET).
-2. Tell `run_debug.bat` where Godot is, in one of these ways:
-   - create `run_debug.local.bat` next to it containing
-     `set GODOT=C:\path\to\Godot_v4.7.2-stable_win64_console.exe` (the console version shows the log), or
-   - set the `GODOT` environment variable to that path, or
-   - copy or rename the Godot executable to `godot.exe` in a folder on PATH.
-3. Run `run_debug.bat`. The first run imports the assets once (a few minutes), then the game starts.
-
-You can also open `game/` in the Godot editor and press F5.
-
-The prebuilt setup is for **Windows** (the launcher and the included native extension). On Linux or macOS, run
-`godot --headless --path game --import` once, then `godot --path game`. There is no prebuilt native extension for
-those systems in the repository: build the native library using [native/README.md](native/README.md).
-Some simulation paths fall back to GDScript, but runtime SWF conversion specifically requires `SWFFile`.
-
-## Regenerating the assets (optional)
-
-Only needed to rebuild `game/assets/sdt/` from an original `SDT.swf`. Requirements: Python 3 with `pillow` and
-`numpy`, Java and [JPEXS FFDec](https://github.com/jindrapetrik/jpexs-decompiler).
-
-```
-python tools/swfconv/convert.py original/SDT.swf game/assets/sdt --scale 2 [--ffdec path/to/ffdec.jar]
-python tools/swfconv/fix_hitmasks.py original/SDT.swf game/assets/sdt
-python tools/swfconv/supersample.py original/SDT.swf game/assets/sdt
+```sh
+git clone --recurse-submodules https://github.com/Tricky-Nerdy/Hyper-Deepthroat.git
+cd Hyper-Deepthroat
+godot --headless --path game --import
+godot --path game
 ```
 
-The native extension can be rebuilt from source too, see `native/README.md`. Without it the game falls back to
-slower GDScript code.
+On Linux, build the native GDExtension as described in [native/README.md](native/README.md) for features requiring native classes; runtime SWF conversion specifically requires `SWFFile`. On Windows, configure the Godot executable path and run `run_debug.bat`. Do not launch tests against personal saves; use an isolated save directory.
 
-## Testing
-
-`game/scenes/main.gd` documents the command-line options for scripted runs (`--eval`, `--driver`, `--shot`,
-`--frames`, `--deterministic`, ...). Always pass `--save-dir=<folder>` to test runs so they don't overwrite your
-own save. Example:
-
-```
-godot --headless --path game -- --save-dir=/tmp/sdt-test --driver=res://debug/stress_costumes.gd
+```sh
+python3 tools/portable_release.py verify
+python3 tools/portable_release.py integration
+python3 -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-`tools/regress.sh` runs the regression tests (Git Bash or any POSIX shell, with `GODOT` set). It plays fixed
-scenarios headless (menu, idle, grab and stroking, costume changes, every character, cumming) with sound and timers
-following game time, so runs repeat exactly. It compares dumps of the display list and character state with the
-references in `tests/golden/`. It runs without mods and with a throwaway save. Options:
-- `--update` accepts the current output as the new reference; check `git diff tests/golden` first;
-- `--stress` adds the costume stress test and reports memory per round;
-- `--mods=<folder>` load-tests every `.swf` mod in a folder.
+These checks do not substitute for reproducing crashes with actual legacy mod packages.
 
-An intended change to the game's behaviour shows up as a difference: review it, then run `--update`.
+## How the game is organized
 
-`tools/check_all.sh` parse-checks every script. It reports "Identifier not found: Flash / g" for autoloads, which
-can be ignored.
+- `game/scenes/main.gd`: main entry point and scripted test options.
+- `game/src/`: game logic ported from ActionScript; `game/flash/`: Flash display/runtime compatibility.
+- `game/assets/sdt/` and `game/assets/mods/`: converted base and community assets.
+- `Mods/` at runtime: Clothing, Hair, Backgrounds, Characters, Dialogue and Plugins.
+- `game/src/ext/loader/`: shared loader core; `native/`: optional C++ extension.
+- `workbench/`, `tools/`, `tests/`: neutral authoring workbench, packaging and tests.
 
-## Contributing
+See [extension authoring](docs/extensions.md), [loader compatibility](docs/loader-compatibility.md), [debugging](docs/debugging.md), [portable workbench](docs/portable-workbench.md), [release results](docs/release-results.md), and [external mod references](docs/external-sources.md). Some development documents may exist only in local, uncommitted work until reviewed and published.
 
-Code contributions are licensed under the MIT license (see `LICENSE`).
+## Local AI: configuration and safety
+
+AI provider configuration is optional. Use local endpoints for private workflows and explicitly approve any LAN route before connecting. Keep bearer tokens in session-only storage or environment variables, **never in committed files, screenshots, logs or URLs**. Distinguish connection tests from successful model inference, and text-provider readiness from image-provider readiness. Never assume a local service is reachable just because its settings appear in a UI.
+
+## Mod compatibility and known blockers
+
+Vanilla SWF mod recognition does **not** establish that every mod's ActionScript behavior, assets, lifecycle and rendering match the Flash original. In particular, the sby alternate loader template, TemplateExtension and ExtraMod require version-specific testing and adapters. The immediate acceptance criterion is: each named package loads without a crash, its features behave as expected, disabling/reloading restores state, and a repeatable regression test documents the result.
+
+## Credits, licenses and redistribution
+
+The underlying port is based on SDT-Godot and the original SDT game. Community mod creators—including sby where their work is referenced—retain credit and rights to their respective contributions. Game art, sounds, fonts and third-party mod assets are **not automatically covered by the code license**. Consult [LICENSE](LICENSE) and the asset attribution notes before redistributing packages or publishing builds.
+
+**Project:** [Tricky-Nerdy/Hyper-Deepthroat](https://github.com/Tricky-Nerdy/Hyper-Deepthroat) · **Studio identity:** Afterdark Atelier · **Release readiness:** blocked pending compatibility, UI and runtime verification.
