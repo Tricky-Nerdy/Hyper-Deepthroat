@@ -111,6 +111,7 @@ static func pause_on_open() -> bool:
 
 
 func _ready() -> void:
+	add_to_group("sdt_menu")
 	layer = 50
 
 
