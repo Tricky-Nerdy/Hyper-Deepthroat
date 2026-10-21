@@ -169,14 +169,14 @@ func _ready() -> void:
 	panel.client.transport = delayed
 	panel.dialogue_url.text = "http://127.0.0.1:1234"
 	panel.output.text = "keep existing preview"
-	panel.open_panel()
+	panel.on_menu_opened()
 	panel.call_deferred("request_text")
 	await delayed.started
 	panel.prompt.text = "Changed request"
 	panel.prompt.text_changed.emit(panel.prompt.text)
 	await get_tree().create_timer(0.12).timeout
 	assert(panel.output.text == "keep existing preview" and not panel._busy)
-	panel.close_panel()
+	panel.on_menu_closed()
 	var broken := FileAccess.open(profile, FileAccess.WRITE)
 	broken.store_string("{broken")
 	broken.close()
