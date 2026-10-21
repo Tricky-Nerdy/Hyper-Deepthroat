@@ -142,8 +142,8 @@ func _ready() -> void:
 	panel.dialogue_token.text = "ui-test-secret"
 	panel.model.text = "mock-model"
 	panel.enabled.button_pressed = true
-	panel.open_panel()
-	assert(get_tree().paused)
+	panel.on_menu_opened()
+	assert(panel._opened) # The dock menu owns gameplay pause state; the review view never pauses the tree.
 	await panel.request_text()
 	assert(ui_mock.calls == 0) # Opening/loading a profile is not LAN approval.
 	panel.dialogue_lan.button_pressed = true
@@ -156,8 +156,8 @@ func _ready() -> void:
 	panel.dialogue_url.text = "http://10.1.2.4:1234"
 	panel.dialogue_url.text_changed.emit(panel.dialogue_url.text) # Exercise the connected user-edit handler.
 	assert(not panel.dialogue_lan.button_pressed and panel.dialogue_token.text == "")
-	panel.close_panel()
-	assert(not get_tree().paused)
+	panel.on_menu_closed()
+	assert(not panel._opened)
 	get_tree().paused = true
 	panel.open_panel()
 	panel.close_panel()
