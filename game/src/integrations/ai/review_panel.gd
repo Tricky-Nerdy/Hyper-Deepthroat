@@ -1,4 +1,4 @@
-extends CanvasLayer
+extends VBoxContainer
 ## Explicit, review-only UI. No gameplay context capture or dialogue/action-parser injection.
 const Config = preload("res://src/integrations/ai/provider_config.gd")
 const Client = preload("res://src/integrations/ai/provider_client.gd")
@@ -7,7 +7,6 @@ const ImageReview = preload("res://src/integrations/ai/image_review.gd")
 
 var profile_path := "user://local_ai/providers.json"
 var client: Node = null # Injectable for neutral integration tests.
-var window: Window
 var enabled: CheckBox
 var dialogue_url: LineEdit
 var image_url: LineEdit
@@ -28,7 +27,6 @@ var output: TextEdit
 var preview: TextureRect
 var status: Label
 var _busy := false
-var _was_paused := false
 var _opened := false
 var _actions: Array[Button] = []
 var _dialogue_approval := ""
@@ -37,30 +35,14 @@ var _epoch := 0
 
 
 func _ready() -> void:
+	# This is hosted in SDTMenu's dock and its existing scroll container.
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	layer = 100
+	size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	add_theme_constant_override("separation", 5)
 	if client == null:
 		client = Client.new()
 	add_child(client)
-	var open_button := Button.new()
-	open_button.text = "Local AI"
-	open_button.position = Vector2(8, 8)
-	open_button.custom_minimum_size = Vector2(88, 32)
-	open_button.pressed.connect(open_panel)
-	add_child(open_button)
-	window = Window.new()
-	window.title = "Optional local AI — review only"
-	window.transient = true
-	window.exclusive = true
-	window.min_size = Vector2i(320, 300)
-	window.close_requested.connect(close_panel)
-	add_child(window)
-	var scroll := ScrollContainer.new()
-	scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	window.add_child(scroll)
-	var column := VBoxContainer.new()
-	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(column)
+	var column: VBoxContainer = self
 	var notice := Label.new()
 	notice.text = "Optional worker connection. Requests send only text/workflows you enter here.\nNo automatic dialogue replacement, action execution or asset import."
 	notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -113,7 +95,7 @@ func _ready() -> void:
 	workflow_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	column.add_child(workflow_label)
 	workflow = TextEdit.new()
-	workflow.custom_minimum_size.y = 100
+	workflow.custom_minimum_size.y = 84
 	column.add_child(workflow)
 	_button(column, "Submit image request", request_image)
 	job_id = _field(column, "ComfyUI job ID", "")
@@ -124,12 +106,12 @@ func _ready() -> void:
 	column.add_child(status)
 	output = TextEdit.new()
 	output.editable = false
-	output.custom_minimum_size.y = 120
+	output.custom_minimum_size.y = 96
 	column.add_child(output)
 	preview = TextureRect.new()
 	preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	preview.custom_minimum_size = Vector2(200, 200)
+	preview.custom_minimum_size = Vector2(160, 160)
 	column.add_child(preview)
 	_button(column, "Close", close_panel, false)
 	for field in [dialogue_url, image_url, model, prompt, job_id, dialogue_token, image_token, dialogue_env, image_env]:
@@ -152,6 +134,12 @@ func _ready() -> void:
 	image_provider.select(0 if config.images.provider == "comfyui" else 1)
 	status.text = "No connection made. LAN consent and tokens are never restored." if loaded.ok else "Profile rejected; optional AI disabled."
 	client.configure(config)
+	call_deferred("_register_with_menu")
+
+
+func _register_with_menu() -> void:
+	if SDTMenu.instance != null:
+		SDTMenu.instance.register_external_section("local_ai", "Local AI", self)
 
 
 func _field(parent: Node, label_text: String, initial: String, secret: bool = false) -> LineEdit:
@@ -197,32 +185,36 @@ func _button(parent: Node, text: String, callback: Callable, action: bool = true
 
 
 func open_panel() -> void:
-	if _opened:
-		return
-	_was_paused = get_tree().paused
-	_opened = true
-	get_tree().paused = true # Stops game input as well as simulation; this layer/HTTP remain active.
-	var viewport_size := get_viewport().get_visible_rect().size
-	window.popup_centered(Vector2i(mini(620, int(viewport_size.x)), mini(560, int(viewport_size.y))))
+	if SDTMenu.instance != null:
+		SDTMenu.instance.open_menu("local_ai")
 
 
 func close_panel() -> void:
+	if SDTMenu.instance != null:
+		SDTMenu.instance.close_menu()
+	else:
+		on_menu_closed()
+
+
+func on_menu_opened() -> void:
+	_opened = true
+
+
+func on_menu_closed() -> void:
+	if not _opened:
+		return
 	_epoch += 1
-	window.hide()
 	dialogue_token.text = ""
 	image_token.text = ""
 	dialogue_lan.button_pressed = false
 	image_lan.button_pressed = false
 	client.clear_session_tokens()
 	client.revoke_lan_access()
-	if _opened:
-		get_tree().paused = _was_paused
 	_opened = false
 
 
 func _exit_tree() -> void:
-	if _opened:
-		get_tree().paused = _was_paused
+	on_menu_closed()
 
 
 func _set_busy(value: bool) -> void:
