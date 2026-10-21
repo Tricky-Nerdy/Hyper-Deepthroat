@@ -40,6 +40,8 @@ var _cache_sig := ""
 var _search_view: Control = null
 static var _controls_version := 0
 var _nav_buttons: Dictionary = {}
+var _nav_group: ButtonGroup
+var _external_views: Dictionary = {} # id -> hosted Control
 var _tab_t := 0.0             # 0 hidden .. 1 shown
 var _frame := 0
 var _paused_by_menu := false
@@ -109,6 +111,7 @@ static func pause_on_open() -> bool:
 
 
 func _ready() -> void:
+	add_to_group("sdt_menu")
 	layer = 50
 
 
@@ -176,14 +179,14 @@ func _build() -> void:
 	vline.color = MenuTheme.LINE
 	vline.custom_minimum_size.x = 1
 	body.add_child(vline)
-	var group := ButtonGroup.new()
+	_nav_group = ButtonGroup.new()
 	for s in sections:
 		if s.get("hidden", false):
 			continue
 		var b := Button.new()
 		b.text = s["name"]
 		b.toggle_mode = true
-		b.button_group = group
+		b.button_group = _nav_group
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		b.focus_mode = Control.FOCUS_NONE
 		b.add_theme_stylebox_override("normal", MenuTheme.box(Color(0, 0, 0, 0), Color(0, 0, 0, 0), 4, 5, 3))
@@ -243,6 +246,38 @@ func _build() -> void:
 	_layout()
 	_dock.visible = false
 	_tab.visible = false
+
+
+## Adds a review-only view to the dock without giving it a separate Window.
+func register_external_section(id: String, title: String, view: Control) -> void:
+	_external_views[id] = view
+	var known := not _find_section(id).is_empty()
+	if not known:
+		var section_spec := {"id": id, "name": title, "external": true}
+		sections.append(section_spec)
+		if _root != null:
+			_add_nav_button(section_spec)
+	view.visible = false
+
+
+func _add_nav_button(s: Dictionary) -> void:
+	if _nav_buttons.has(s["id"]):
+		return
+	var b := Button.new()
+	b.text = s["name"]
+	b.toggle_mode = true
+	b.button_group = _nav_group
+	b.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	b.focus_mode = Control.FOCUS_NONE
+	b.add_theme_stylebox_override("normal", MenuTheme.box(Color(0, 0, 0, 0), Color(0, 0, 0, 0), 4, 5, 3))
+	b.add_theme_stylebox_override("hover", MenuTheme.box(MenuTheme.CARD, Color(0, 0, 0, 0), 4, 5, 3))
+	b.add_theme_stylebox_override("pressed", MenuTheme.box(MenuTheme.ACCENT, Color(0, 0, 0, 0), 4, 5, 3))
+	b.add_theme_stylebox_override("hover_pressed", MenuTheme.box(MenuTheme.ACCENT, Color(0, 0, 0, 0), 4, 5, 3))
+	b.add_theme_color_override("font_color", MenuTheme.MUTED)
+	var sid: String = s["id"]
+	b.pressed.connect(func(): show_section(sid))
+	_nav.add_child(b)
+	_nav_buttons[sid] = b
 
 
 ## Popups that do not belong to a row (lists, dialogs); closed with the menu.
@@ -338,7 +373,8 @@ func open_menu(sec := "") -> void:
 		return
 	if sec != "":
 		section = sec
-	if not is_open:
+	var became_open := not is_open
+	if became_open:
 		is_open = true
 		_dock.visible = true
 		_paused_by_menu = pause_on_open()
@@ -346,11 +382,19 @@ func open_menu(sec := "") -> void:
 			g.gamePaused = true
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_show()
+	if became_open and _external_views.has(section):
+		var external: Control = _external_views[section]
+		if external.has_method("on_menu_opened"):
+			external.call("on_menu_opened")
 
 
 func close_menu() -> void:
 	if not is_open:
 		return
+	if _external_views.has(section):
+		var external: Control = _external_views[section]
+		if external.has_method("on_menu_closed"):
+			external.call("on_menu_closed")
 	is_open = false
 	_dock.visible = false
 	_search.release_focus()
@@ -440,6 +484,11 @@ func _show() -> void:
 		_search_view = null
 	var view: Control
 	var s := {}
+	if query == "":
+		s = _find_section(section)
+		if not s.is_empty() and s.get("external", false):
+			_show_external(s)
+			return
 	if query != "":
 		var q := query.to_lower()
 		var groups: Array = []
@@ -475,6 +524,26 @@ func _show() -> void:
 	_refresh_rows()
 	if query == "":
 		_scroll.scroll_vertical = 0
+
+
+func _show_external(s: Dictionary) -> void:
+	var view: Control = _external_views.get(s["id"])
+	if view == null:
+		return
+	if view.get_parent() != _content:
+		if view.get_parent() != null:
+			view.reparent(_content)
+		else:
+			_content.add_child(view)
+	for child in _content.get_children():
+		child.visible = child == view
+	_heading.text = s["name"]
+	_back.visible = false
+	_rows = []
+	for sid in _nav_buttons:
+		_nav_buttons[sid].set_pressed_no_signal(sid == s["id"])
+		_nav_buttons[sid].add_theme_color_override("font_color", MenuTheme.INK if sid == s["id"] else MenuTheme.MUTED)
+	_scroll.scroll_vertical = 0
 
 
 ## One section's (or the search results') cards, added to the content and kept for the next visit. The cards are
