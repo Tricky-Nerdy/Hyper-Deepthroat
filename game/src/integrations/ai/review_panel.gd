@@ -137,9 +137,14 @@ func _ready() -> void:
 	call_deferred("_register_with_menu")
 
 
+func _menu() -> Node:
+	return get_tree().get_first_node_in_group("sdt_menu")
+
+
 func _register_with_menu() -> void:
-	if SDTMenu.instance != null:
-		SDTMenu.instance.register_external_section("local_ai", "Local AI", self)
+	var menu := _menu()
+	if menu != null:
+		menu.call("register_external_section", "local_ai", "Local AI", self)
 
 
 func _field(parent: Node, label_text: String, initial: String, secret: bool = false) -> LineEdit:
@@ -185,13 +190,15 @@ func _button(parent: Node, text: String, callback: Callable, action: bool = true
 
 
 func open_panel() -> void:
-	if SDTMenu.instance != null:
-		SDTMenu.instance.open_menu("local_ai")
+	var menu := _menu()
+	if menu != null:
+		menu.call("open_menu", "local_ai")
 
 
 func close_panel() -> void:
-	if SDTMenu.instance != null:
-		SDTMenu.instance.close_menu()
+	var menu := _menu()
+	if menu != null:
+		menu.call("close_menu")
 	else:
 		on_menu_closed()
 
