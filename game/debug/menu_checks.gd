@@ -79,6 +79,12 @@ func _open_checks() -> void:
 	menu.close_menu()
 	g.inGameMenu.toggleMenu(true, 4)
 	_check("O opens Settings", menu.is_open and menu.section == "settings")
+	var ai: Control = menu._external_views.get("local_ai")
+	_check("Local AI is registered in the dock", ai != null and menu._nav_buttons.has("local_ai"))
+	menu.open_menu("local_ai")
+	_check("Local AI opens in the dock", menu.is_open and menu.section == "local_ai" and ai.visible and ai.get_parent() == menu._content)
+	menu.close_menu()
+	_check("Local AI close returns to the game menu state", not menu.is_open and not ai.visible)
 
 
 func _section_checks() -> void:
